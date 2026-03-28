@@ -1,0 +1,244 @@
+# Idiomas - Sistema de Localizacion para VRChat
+
+Sistema de localizacion standalone para mundos de VRChat usando UdonSharp.
+Traduce automaticamente todos los textos de un Canvas a multiples idiomas.
+
+**100% independiente.** No requiere YamaPlayer ni ningun otro sistema externo.
+
+---
+
+## Instalacion
+
+### Paso 1: Importar al proyecto
+
+Copia la carpeta `Assets/Idiomas/` completa a tu proyecto de Unity.
+
+### Paso 2: Configurar fuentes (IMPORTANTE)
+
+El sistema soporta 11 idiomas incluyendo japones, chino, coreano y ruso.
+Para que estos caracteres se muestren correctamente, necesitas configurar
+fuentes de respaldo (fallback) en TextMeshPro.
+
+1. En la carpeta `Assets/Idiomas/Data/` encontraras estos font assets:
+   - `NotoSansKR SDF` (coreano + cirilico + latin + algo de CJK)
+   - `NotoSansJP SDF` (japones + chino)
+
+2. En el **Project**, navega a `Assets/TextMesh Pro/Resources/`
+
+3. Haz clic en **TMP Settings**
+
+4. En el Inspector, busca **Fallback Font Assets** (dice Size 0)
+
+5. Cambia Size de `0` a `2`
+
+6. Arrastra los fonts:
+   - Element 0: `NotoSansKR SDF`
+   - Element 1: `NotoSansJP SDF`
+
+7. **Ctrl+S** para guardar
+
+Sin este paso, los idiomas como japones, chino, coreano y ruso mostraran
+cuadraditos en vez de caracteres.
+
+### Paso 3: Agregar el prefab a tu escena
+
+1. En el Project, ve a `Assets/Idiomas/Prefabs/`
+2. Arrastra **`LocalizationManager`** a tu escena (Hierarchy)
+3. Esto incluye el LocalizationManager + el selector de idioma (dropdown)
+4. Posiciona el LanguageSelector (canvas) donde quieras en tu mundo
+
+### Paso 4: Conectar el dropdown (primera vez)
+
+1. Selecciona el **LocalizationManager** en la Hierarchy
+2. En el Inspector, verifica que **Dropdown** esta asignado
+3. Verifica que **Codigos de Idioma** tiene 12 elementos
+4. Si aparece el boton amarillo **"Conectar Dropdown"**, haz clic en el
+5. Si no aparece, ya esta conectado
+
+---
+
+## Traducir un Canvas
+
+### Metodo rapido: CanvasLocalizer (un componente por canvas)
+
+1. Selecciona el **GameObject raiz** de tu Canvas
+2. **Add Component** → busca **CanvasLocalizer**
+3. Configura:
+   - **Manager**: arrastra el LocalizationManager de la escena
+   - **ID del Canvas**: un nombre unico (ej: `settings`, `lobby`, `hud`)
+   - **Idioma Base**: el idioma en que estan escritos los textos actuales (ej: `en`)
+4. En el Inspector, clic en **"Escanear Canvas"**
+   - Detecta automaticamente todos los textos (TextMeshPro y Text legacy)
+   - Muestra una tabla con las claves generadas
+   - Puedes excluir textos que no deben traducirse (numeros, iconos)
+   - Puedes editar las claves manualmente
+5. Clic en **"Exportar al JSON y Aplicar"**
+   - Guarda los textos originales al archivo JSON bajo el idioma base
+   - Si no existe archivo JSON, lo crea automaticamente
+   - Llena los arrays del componente
+
+### Metodo individual: TextLocalizer (un componente por texto)
+
+Para textos sueltos que no estan en un canvas:
+
+1. Selecciona el GameObject con Text o TextMeshProUGUI
+2. **Add Component** → busca **TextLocalizer**
+3. Asigna el **LocalizationManager**
+4. Escribe la **clave de traduccion** (ej: `btn_start`)
+
+---
+
+## Traducir a otros idiomas
+
+### Automatico: MyMemory API (gratis)
+
+1. Selecciona el **LocalizationManager** en la Hierarchy
+2. En el Inspector, clic en **"Auto-Traducir Idiomas Faltantes"**
+3. Se abre una ventana:
+   - Selecciona el idioma origen (el que tiene mas claves)
+   - Marca los idiomas destino
+   - Clic en **"Traducir"**
+4. Revisa las traducciones en la vista previa
+5. Clic en **"Guardar al JSON"**
+
+API MyMemory: gratis, sin registro, 5000 palabras por dia.
+Las traducciones marcadas [TODO:xx] fallaron y necesitan traduccion manual.
+
+### Manual
+
+Edita directamente el archivo JSON en `Assets/Idiomas/Data/translation.json`.
+Formato:
+
+```json
+{
+    "en": {
+        "mi_clave": "English text"
+    },
+    "es": {
+        "mi_clave": "Texto en espanol"
+    },
+    "ja": {
+        "mi_clave": "日本語テキスト"
+    }
+}
+```
+
+---
+
+## Idiomas soportados
+
+| Codigo | Idioma | Caracteres especiales |
+|--------|--------|----------------------|
+| `en` | English | No |
+| `es` | Espanol | No |
+| `ja` | Japanese | Si (requiere fallback fonts) |
+| `ko` | Korean | Si (requiere fallback fonts) |
+| `zh-CN` | Chinese Simplified | Si (requiere fallback fonts) |
+| `zh-TW` | Chinese Traditional | Si (requiere fallback fonts) |
+| `ru` | Russian | Si (requiere fallback fonts) |
+| `pt-BR` | Portuguese | No |
+| `fr` | French | No |
+| `de` | German | No |
+| `ca` | Catalan | No |
+
+Puedes agregar cualquier idioma editando el JSON. El sistema detecta
+automaticamente los idiomas disponibles.
+
+---
+
+## Componentes
+
+### LocalizationManager
+El cerebro del sistema. Solo necesitas **uno por escena**.
+
+- Carga el JSON de traducciones
+- Detecta automaticamente el idioma del jugador (VRChat API)
+- Fallback inteligente: idioma del jugador → variantes → zona horaria → fallback
+- Gestiona el dropdown de seleccion de idioma
+- Notifica a todos los CanvasLocalizer y TextLocalizer cuando cambia el idioma
+
+### CanvasLocalizer
+Se coloca en el **raiz de un Canvas** y traduce todos los textos hijos.
+
+- Escanea automaticamente TMP_Text y Text legacy
+- Genera claves de traduccion desde la jerarquia de GameObjects
+- Exporta textos al JSON automaticamente
+- Un solo componente por canvas (no uno por texto)
+
+### TextLocalizer
+Se coloca en **un solo texto** para traduccion individual.
+
+- Para textos sueltos fuera de canvas
+- Soporta prefijo, sufijo y rich text
+- Se puede cambiar la clave en runtime
+
+---
+
+## Deteccion Automatica de Idioma
+
+Al iniciar, el sistema detecta el idioma del jugador:
+
+1. **API de VRChat**: `VRCPlayerApi.GetCurrentLanguage()`
+2. **Variantes**: `es-CL` → busca `es` si no existe `es-CL`
+3. **Zona horaria**: Tokyo → `ja`, Madrid → `es`, etc.
+4. **Fallback**: usa el idioma por defecto (`en`)
+
+---
+
+## Herramientas del Editor
+
+### Inspector del LocalizationManager
+- **Dropdown**: configuracion del selector de idioma
+- **Auto-buscar**: encuentra todos los localizers de la escena
+- **Auto-Traducir**: traduce idiomas faltantes con MyMemory API
+- **Validacion**: detecta claves faltantes en algun idioma
+- **Vista Previa**: muestra traducciones sin entrar en Play Mode
+
+### Inspector del CanvasLocalizer
+- **Escanear Canvas**: detecta todos los textos automaticamente
+- **Tabla de resultados**: editar claves, excluir textos
+- **Exportar al JSON**: guarda textos y crea el archivo si no existe
+
+---
+
+## Estructura de Archivos
+
+```
+Assets/Idiomas/
+├── Runtime/
+│   ├── LocalizationManager.cs    # Cerebro del sistema
+│   ├── CanvasLocalizer.cs        # Localizador de canvas completo
+│   ├── TextLocalizer.cs          # Localizador de texto individual
+│   ├── LanguageDropdown.cs       # Dropdown de idioma (opcional)
+│   ├── LanguageSelector.cs       # Selector legacy (botones)
+│   └── LanguageButton.cs         # Boton de idioma legacy
+├── Editor/
+│   ├── LocalizationManagerEditor.cs   # Inspector del Manager
+│   ├── CanvasLocalizerEditor.cs       # Inspector del CanvasLocalizer
+│   ├── AutoTranslateWindow.cs         # Ventana de auto-traduccion
+│   └── IdiomasPrefabCreator.cs        # Creador de demos
+├── Data/
+│   ├── translation.json               # Traducciones (se crea automatico)
+│   ├── NotoSansKR SDF.asset           # Font fallback (coreano/cirilico)
+│   ├── NotoSansJP SDF.asset           # Font fallback (japones/chino)
+│   └── translation_characters.txt     # Caracteres para generar fonts
+├── Prefabs/
+│   └── LocalizationManager.prefab     # Prefab listo para usar
+└── README.md
+```
+
+---
+
+## Compatibilidad
+
+- Unity 2022.3.x (requerido por VRChat)
+- VRChat SDK Worlds >= 3.8.1
+- UdonSharp (incluido en VRChat SDK)
+- TextMeshPro (incluido en Unity)
+- Compatible con Quest y PC
+
+---
+
+## Licencia
+
+Libre para uso personal y comercial. Creditos apreciados pero no requeridos.
