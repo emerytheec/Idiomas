@@ -19,6 +19,10 @@ jobs:
         id: get_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
+      - name: Update package.json version
+        run: |
+          jq '.version = "${{ steps.get_version.outputs.VERSION }}"' package.json > tmp.json && mv tmp.json package.json
+
       - name: Create package zip
         run: |
           zip -r "com.benderdios.idiomas-${{ steps.get_version.outputs.VERSION }}.zip" . \
