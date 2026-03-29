@@ -1,0 +1,186 @@
+name: Build and Release VPM Package
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Create package zip
+        run: |
+          zip -r "com.benderdios.idiomas-${{ steps.get_version.outputs.VERSION }}.zip" . \
+            -x "*.git*" \
+            -x ".github/*"
+
+      - name: Create unitypackage
+        run: |
+          python3 << 'EOF'
+          import os
+          import re
+          import tarfile
+          import tempfile
+          import shutil
+          import hashlib
+
+          def get_guid_from_meta(meta_path):
+              """Extract GUID from .meta file"""
+              try:
+                  with open(meta_path, 'r', encoding='utf-8') as f:
+                      content = f.read()
+                      match = re.search(r'guid:\s*([a-fA-F0-9]+)', content)
+                      if match:
+                          return match.group(1)
+              except:
+                  pass
+              return None
+
+          def create_unitypackage(source_dir, output_path, base_path="Assets/Idiomas"):
+              """Create a .unitypackage from source directory"""
+              temp_dir = tempfile.mkdtemp()
+
+              try:
+                  for root, dirs, files in os.walk(source_dir):
+                      dirs[:] = [d for d in dirs if d not in ['.git', '.github']]
+
+                      for file in files:
+                          file_path = os.path.join(root, file)
+                          rel_path = os.path.relpath(file_path, source_dir)
+
+                          if '.git' in rel_path:
+                              continue
+
+                          asset_path = os.path.join(base_path, rel_path).replace('\\', '/')
+
+                          if file.endswith('.meta'):
+                              continue
+
+                          meta_path = file_path + '.meta'
+
+                          guid = None
+                          if os.path.exists(meta_path):
+                              guid = get_guid_from_meta(meta_path)
+
+                          if not guid:
+                              guid = hashlib.md5(asset_path.encode()).hexdigest()
+
+                          asset_dir = os.path.join(temp_dir, guid)
+                          os.makedirs(asset_dir, exist_ok=True)
+
+                          shutil.copy2(file_path, os.path.join(asset_dir, 'asset'))
+
+                          if os.path.exists(meta_path):
+                              shutil.copy2(meta_path, os.path.join(asset_dir, 'asset.meta'))
+
+                          with open(os.path.join(asset_dir, 'pathname'), 'w', encoding='utf-8') as f:
+                              f.write(asset_path)
+
+                  with tarfile.open(output_path, 'w:gz') as tar:
+                      for item in os.listdir(temp_dir):
+                          item_path = os.path.join(temp_dir, item)
+                          tar.add(item_path, arcname=item)
+
+                  print(f"Created {output_path}")
+
+              finally:
+                  shutil.rmtree(temp_dir)
+
+          version = "${{ steps.get_version.outputs.VERSION }}"
+          create_unitypackage('.', f'Idiomas-{version}.unitypackage')
+          EOF
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            com.benderdios.idiomas-${{ steps.get_version.outputs.VERSION }}.zip
+            Idiomas-${{ steps.get_version.outputs.VERSION }}.unitypackage
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout vpm-listing repo
+        id: checkout_vpm
+        uses: actions/checkout@v4
+        with:
+          repository: emerytheec/vpm-listing
+          path: vpm-listing
+          token: ${{ secrets.VPM_TOKEN }}
+        continue-on-error: true
+
+      - name: Update VPM listing
+        if: steps.checkout_vpm.outcome == 'success'
+        run: |
+          if [ ! -f "vpm-listing/index.json" ]; then
+            echo "::warning::vpm-listing/index.json not found. Skipping VPM update."
+            exit 0
+          fi
+
+          VERSION="${{ steps.get_version.outputs.VERSION }}"
+          cd vpm-listing
+
+          python3 << 'EOF'
+          import json
+
+          version = "${{ steps.get_version.outputs.VERSION }}"
+
+          with open('index.json', 'r') as f:
+              index = json.load(f)
+
+          with open('../package.json', 'r') as f:
+              package = json.load(f)
+
+          new_version = {
+              "name": package["name"],
+              "version": version,
+              "displayName": package["displayName"],
+              "description": package["description"],
+              "unity": package["unity"],
+              "url": f"https://github.com/emerytheec/Idiomas/releases/download/v{version}/com.benderdios.idiomas-{version}.zip",
+              "keywords": package.get("keywords", []),
+              "author": package.get("author", {}),
+              "vpmDependencies": package.get("vpmDependencies", {}),
+              "legacyFolders": package.get("legacyFolders", {}),
+              "license": package.get("license", "MIT")
+          }
+
+          package_id = package["name"]
+          if package_id not in index["packages"]:
+              index["packages"][package_id] = {"versions": {}}
+
+          index["packages"][package_id]["versions"][version] = new_version
+
+          with open('index.json', 'w') as f:
+              json.dump(index, f, indent=2)
+
+          print(f"Added version {version} to index.json")
+          EOF
+
+      - name: Commit and push vpm-listing
+        if: steps.checkout_vpm.outcome == 'success'
+        run: |
+          if [ ! -f "vpm-listing/index.json" ]; then
+            exit 0
+          fi
+          cd vpm-listing
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add index.json
+          git diff --staged --quiet || git commit -m "Add Idiomas version ${{ steps.get_version.outputs.VERSION }}"
+          git push
+
+      - name: VPM update status
+        if: steps.checkout_vpm.outcome != 'success'
+        run: |
+          echo "::warning::VPM listing update skipped. Check that VPM_TOKEN secret is configured."
