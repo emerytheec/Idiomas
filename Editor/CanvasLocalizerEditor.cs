@@ -114,9 +114,9 @@ public class CanvasLocalizerEditor : Editor
         EditorGUILayout.PropertyField(_canvasId,
             new GUIContent("ID del Canvas",
                 "Prefijo unico para las claves. Ej: 'settings', 'lobby', 'hud'."));
-        EditorGUILayout.PropertyField(_baseLanguage,
-            new GUIContent("Idioma Base",
-                "Idioma en que estan escritos los textos actuales. Ej: 'es', 'en'."));
+
+        // --- Idioma Base como dropdown ---
+        DrawBaseLanguageDropdown();
 
         // Validar canvasId
         string canvasId = _canvasId.stringValue;
@@ -192,6 +192,99 @@ public class CanvasLocalizerEditor : Editor
         }
 
         serializedObject.ApplyModifiedProperties();
+    }
+
+    // =====================================================================
+    // Dropdown de idioma base
+    // =====================================================================
+
+    private static readonly string[] BASE_LANG_CODES = {
+        "en", "es", "ja", "ko", "zh-CN", "zh-TW", "ru", "pt-BR", "fr", "de", "ca"
+    };
+
+    private static readonly string[] BASE_LANG_LABELS = {
+        "en — English",
+        "es — Espanol",
+        "ja — Japanese",
+        "ko — Korean",
+        "zh-CN — Chinese Simplified",
+        "zh-TW — Chinese Traditional",
+        "ru — Russian",
+        "pt-BR — Portuguese",
+        "fr — French",
+        "de — German",
+        "ca — Catalan"
+    };
+
+    private void DrawBaseLanguageDropdown()
+    {
+        string current = _baseLanguage.stringValue;
+
+        // Buscar indice actual en la lista
+        int selectedIndex = -1;
+        for (int i = 0; i < BASE_LANG_CODES.Length; i++)
+        {
+            if (BASE_LANG_CODES[i] == current)
+            {
+                selectedIndex = i;
+                break;
+            }
+        }
+
+        if (selectedIndex >= 0)
+        {
+            // El idioma actual esta en la lista: mostrar dropdown normal
+            int newIndex = EditorGUILayout.Popup(
+                new GUIContent("Idioma Base",
+                    "Idioma en que estan escritos los textos actuales del canvas."),
+                selectedIndex, BASE_LANG_LABELS);
+
+            if (newIndex != selectedIndex)
+            {
+                _baseLanguage.stringValue = BASE_LANG_CODES[newIndex];
+            }
+        }
+        else
+        {
+            // El idioma actual no esta en la lista (valor personalizado o vacio)
+            // Mostrar dropdown + campo de texto para no perder el valor
+            EditorGUILayout.BeginHorizontal();
+
+            // Construir opciones con el valor actual como primera opcion
+            string[] labels;
+            string[] codes;
+            if (!string.IsNullOrEmpty(current))
+            {
+                labels = new string[BASE_LANG_LABELS.Length + 1];
+                codes = new string[BASE_LANG_CODES.Length + 1];
+                labels[0] = current + " (personalizado)";
+                codes[0] = current;
+                for (int i = 0; i < BASE_LANG_LABELS.Length; i++)
+                {
+                    labels[i + 1] = BASE_LANG_LABELS[i];
+                    codes[i + 1] = BASE_LANG_CODES[i];
+                }
+                int newIndex = EditorGUILayout.Popup(
+                    new GUIContent("Idioma Base"), 0, labels);
+                if (newIndex != 0)
+                {
+                    _baseLanguage.stringValue = codes[newIndex];
+                }
+            }
+            else
+            {
+                int newIndex = EditorGUILayout.Popup(
+                    new GUIContent("Idioma Base",
+                        "Selecciona el idioma en que estan escritos los textos del canvas."),
+                    -1, BASE_LANG_LABELS);
+                if (newIndex >= 0)
+                {
+                    _baseLanguage.stringValue = BASE_LANG_CODES[newIndex];
+                }
+            }
+
+            EditorGUILayout.EndHorizontal();
+        }
     }
 
     // =====================================================================

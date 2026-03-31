@@ -4,7 +4,11 @@ using TMPro;
 using VRC.SDKBase;
 
 /// <summary>
-/// Selector de idioma basado en TMP_Dropdown para VRChat.
+/// [OPCIONAL] Selector de idioma basado en TMP_Dropdown para VRChat.
+/// NOTA: La logica principal del dropdown esta centralizada en LocalizationManager
+/// (metodo OnLanguageDropdownChanged). Este componente es un wrapper adicional
+/// que se puede usar si necesitas un dropdown separado del manager.
+/// En la mayoria de los casos, NO necesitas este componente.
 ///
 /// Ventajas sobre el sistema de botones:
 ///   - Un solo componente por selector (en vez de uno por boton).

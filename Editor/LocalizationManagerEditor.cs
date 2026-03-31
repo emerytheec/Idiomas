@@ -271,9 +271,18 @@ public class LocalizationManagerEditor : Editor
             return;
         }
 
-        _validationScroll = EditorGUILayout.BeginScrollView(_validationScroll, GUILayout.MaxHeight(200));
-        int warnings = 0;
+        // Boton de verificacion completa
+        if (GUILayout.Button("Verificar Integridad del JSON"))
+        {
+            _forceFullValidation = true;
+        }
 
+        _validationScroll = EditorGUILayout.BeginScrollView(_validationScroll, GUILayout.MaxHeight(300));
+        int warnings = 0;
+        int todoCount = 0;
+        int emptyCount = 0;
+
+        // --- Verificar claves faltantes en localizers ---
         // TextLocalizers
         for (int i = 0; i < _localizers.arraySize; i++)
         {
@@ -311,11 +320,63 @@ public class LocalizationManagerEditor : Editor
                 }
         }
 
-        if (warnings == 0)
-            EditorGUILayout.HelpBox("Todas las claves existen en todos los idiomas.", MessageType.Info);
+        // --- Verificacion completa del JSON (traducciones [TODO:] y vacias) ---
+        if (_forceFullValidation)
+        {
+            for (int i = 0; i < _cachedLanguages.Length; i++)
+            {
+                string lang = _cachedLanguages[i];
+                if (!_cachedData.TryGetValue(lang, out DataToken lt) ||
+                    lt.TokenType != TokenType.DataDictionary) continue;
+
+                DataDictionary langDict = lt.DataDictionary;
+                DataList keys = langDict.GetKeys();
+                for (int k = 0; k < keys.Count; k++)
+                {
+                    string key = keys[k].String;
+                    if (!langDict.TryGetValue(key, out DataToken val)) continue;
+                    string value = val.String;
+
+                    if (value.StartsWith("[TODO:"))
+                    {
+                        EditorGUILayout.HelpBox(
+                            $"[TODO] '{lang}' > '{key}': {value}",
+                            MessageType.Warning);
+                        todoCount++;
+                    }
+                    else if (string.IsNullOrEmpty(value) || string.IsNullOrWhiteSpace(value))
+                    {
+                        EditorGUILayout.HelpBox(
+                            $"[VACIO] '{lang}' > '{key}'",
+                            MessageType.Warning);
+                        emptyCount++;
+                    }
+                }
+            }
+        }
+
+        // --- Resumen ---
+        int totalIssues = warnings + todoCount + emptyCount;
+        if (totalIssues == 0)
+        {
+            EditorGUILayout.HelpBox(
+                _forceFullValidation
+                    ? "Sin problemas. Todas las claves existen en todos los idiomas, sin [TODO:] ni vacios."
+                    : "Todas las claves de los localizers existen en todos los idiomas.",
+                MessageType.Info);
+        }
+        else if (_forceFullValidation)
+        {
+            EditorGUILayout.Space(3);
+            EditorGUILayout.LabelField(
+                $"Resumen: {warnings} faltantes, {todoCount} [TODO:], {emptyCount} vacios",
+                EditorStyles.helpBox);
+        }
 
         EditorGUILayout.EndScrollView();
     }
+
+    private bool _forceFullValidation;
 
     private void CheckKey(string owner, string key, ref int warnings)
     {
@@ -403,7 +464,7 @@ public class LocalizationManagerEditor : Editor
         TextAsset ta = _translationFile.objectReferenceValue as TextAsset;
         if (ta == null) { _cachedData = null; _cachedLanguages = null; _cachedKeys = null; return; }
 
-        string hash = ta.text.Length.ToString();
+        string hash = ta.text.GetHashCode().ToString();
         if (hash == _cachedJsonHash) return;
         _cachedJsonHash = hash;
 

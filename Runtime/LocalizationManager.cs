@@ -53,27 +53,21 @@ public class LocalizationManager : UdonSharpBehaviour
     [Tooltip("Codigos de idioma en el MISMO ORDEN que las opciones del dropdown. Vacio = auto-detectar.")]
     [SerializeField] private string[] _dropdownLanguageCodes = new string[0];
 
+    [Header("Listeners (Opcional)")]
+    [Tooltip("UdonSharpBehaviours que reciben '_OnLanguageChanged' cuando cambia el idioma.\n" +
+             "Util para scripts externos que necesitan reaccionar al cambio (cambiar imagenes, etc).")]
+    [SerializeField] private UdonSharpBehaviour[] _listeners = new UdonSharpBehaviour[0];
+
     // =====================================================================
     // Estado interno
     // =====================================================================
 
     private DataDictionary _translationData;
+    private DataDictionary _currentLangDict;  // Cache del diccionario del idioma activo
+    private DataDictionary _fallbackLangDict;  // Cache del diccionario del fallback
     private string _currentLanguage;
     private bool _initialized;
     private string[] _availableLanguages = new string[0];
-
-    // =====================================================================
-    // Propiedades publicas (solo lectura desde otros scripts)
-    // =====================================================================
-
-    /// <summary>Idioma actualmente activo.</summary>
-    [HideInInspector] public string currentLanguage;
-
-    /// <summary>Numero de idiomas disponibles en el JSON.</summary>
-    [HideInInspector] public int languageCount;
-
-    /// <summary>True cuando el sistema esta listo para usar.</summary>
-    [HideInInspector] public bool isReady;
 
     // =====================================================================
     // Inicializacion
@@ -95,7 +89,6 @@ public class LocalizationManager : UdonSharpBehaviour
         {
             Debug.LogError("[LocalizationManager] No se asigno translationFile. Asigna un TextAsset JSON.");
             _initialized = true;
-            isReady = false;
             return;
         }
 
@@ -103,7 +96,6 @@ public class LocalizationManager : UdonSharpBehaviour
         {
             Debug.LogError("[LocalizationManager] Error al parsear el JSON de traducciones.");
             _initialized = true;
-            isReady = false;
             return;
         }
 
@@ -111,7 +103,6 @@ public class LocalizationManager : UdonSharpBehaviour
         {
             Debug.LogError("[LocalizationManager] El JSON de traducciones debe ser un objeto raiz {}.");
             _initialized = true;
-            isReady = false;
             return;
         }
 
@@ -124,16 +115,14 @@ public class LocalizationManager : UdonSharpBehaviour
         {
             _availableLanguages[i] = keys[i].String;
         }
-        languageCount = _availableLanguages.Length;
 
         // --- Detectar idioma del jugador ---
         _currentLanguage = DetectLanguage();
-        currentLanguage = _currentLanguage;
+        CacheLangDictionaries();
 
         _initialized = true;
-        isReady = true;
 
-        Debug.Log($"[LocalizationManager] Inicializado. Idioma: {_currentLanguage}, Idiomas disponibles: {languageCount}");
+        Debug.Log($"[LocalizationManager] Inicializado. Idioma: {_currentLanguage}, Idiomas disponibles: {_availableLanguages.Length}");
     }
 
     // =====================================================================
@@ -194,30 +183,208 @@ public class LocalizationManager : UdonSharpBehaviour
     /// <summary>
     /// Detecta idioma por zona horaria del sistema (fallback para cuando VRChat
     /// no devuelve un idioma valido o no existe en el JSON).
+    ///
+    /// Soporta dos formatos de ID:
+    ///   - Windows: "Tokyo Standard Time", "Romance Standard Time", etc.
+    ///   - IANA (Quest/Android/Linux): "Asia/Tokyo", "Europe/Madrid", etc.
+    ///
+    /// Cuando una zona horaria cubre multiples paises con idiomas diferentes
+    /// (ej: "Romance Standard Time" = Espana + Francia + Italia + Belgica),
+    /// se prefiere el idioma mas hablado en VRChat para esa zona,
+    /// o se devuelve el fallback si la ambiguedad es muy alta.
     /// </summary>
     private string GetLanguageByTimeZone()
     {
-        TimeZoneInfo tz = TimeZoneInfo.Local;
-        switch (tz.Id)
+        string tzId = TimeZoneInfo.Local.Id;
+
+        // Intentar primero match exacto (cubre Windows y IANA)
+        string result = MatchTimeZone(tzId);
+        if (result != null) return result;
+
+        // En algunos sistemas el ID puede contener el formato largo,
+        // intentar match parcial con Contains para IANA
+        result = MatchTimeZonePartial(tzId);
+        if (result != null) return result;
+
+        return "en";
+    }
+
+    /// <summary>
+    /// Match exacto del ID de zona horaria.
+    /// Retorna null si no hay match.
+    /// </summary>
+    private string MatchTimeZone(string tzId)
+    {
+        switch (tzId)
         {
-            case "Tokyo Standard Time":
+            // === Japones (ja) ===
+            case "Tokyo Standard Time":       // Windows
+            case "Asia/Tokyo":                // IANA
                 return "ja";
-            case "Taipei Standard Time":
+
+            // === Chino Tradicional (zh-TW) ===
+            case "Taipei Standard Time":      // Windows
+            case "Asia/Taipei":               // IANA
                 return "zh-TW";
-            case "China Standard Time":
+
+            // === Chino Simplificado (zh-CN) ===
+            case "China Standard Time":       // Windows
+            case "Asia/Shanghai":             // IANA
+            case "Asia/Hong_Kong":            // IANA (Hong Kong usa simplificado mayormente)
                 return "zh-CN";
-            case "Korea Standard Time":
-            case "North Korea Standard Time":
+
+            // === Coreano (ko) ===
+            case "Korea Standard Time":       // Windows
+            case "North Korea Standard Time": // Windows
+            case "Asia/Seoul":                // IANA
+            case "Asia/Pyongyang":            // IANA
                 return "ko";
-            case "Romance Standard Time":
-            case "W. Europe Standard Time":
+
+            // === Espanol (es) ===
+            // Windows: Romance Standard Time cubre Espana, Francia, Italia, Belgica.
+            // Para PC, la mayoria de usuarios VRChat en esa zona son hispanohablantes,
+            // pero es ambiguo. Usamos IANA para ser precisos cuando sea posible.
+            case "Romance Standard Time":     // Windows (Espana/Francia/Italia - ambiguo)
                 return "es";
-            case "Russian Standard Time":
-            case "Moscow Standard Time":
+            // IANA: Espana
+            case "Europe/Madrid":
+            case "Atlantic/Canary":
+                return "es";
+            // IANA: Latinoamerica hispanohablante
+            case "America/Mexico_City":
+            case "America/Bogota":
+            case "America/Lima":
+            case "America/Santiago":
+            case "America/Argentina/Buenos_Aires":
+            case "America/Caracas":
+            case "America/Guayaquil":
+            case "America/Montevideo":
+            case "America/Asuncion":
+            case "America/La_Paz":
+            case "America/Panama":
+            case "America/Costa_Rica":
+            case "America/El_Salvador":
+            case "America/Guatemala":
+            case "America/Tegucigalpa":
+            case "America/Managua":
+            // Windows: Latinoamerica
+            case "Central America Standard Time":
+            case "SA Pacific Standard Time":
+            case "SA Western Standard Time":
+            case "SA Eastern Standard Time":
+            case "Mexico Standard Time":
+            case "Central Standard Time (Mexico)":
+            case "Mountain Standard Time (Mexico)":
+            case "Pacific Standard Time (Mexico)":
+            case "Argentina Standard Time":
+            case "Venezuela Standard Time":
+            case "Paraguay Standard Time":
+            case "Montevideo Standard Time":
+            case "Pacific SA Standard Time":
+                return "es";
+
+            // === Frances (fr) ===
+            case "Europe/Paris":              // IANA
+            case "Europe/Brussels":           // IANA (Belgica - mayormente frances)
+            case "Africa/Casablanca":         // IANA (Marruecos - frances comun)
+            case "America/Montreal":          // IANA (Quebec)
+            case "Morocco Standard Time":     // Windows
+                return "fr";
+
+            // === Aleman (de) ===
+            case "W. Europe Standard Time":   // Windows (Alemania/Paises Bajos/Austria/Suiza)
+            case "Central Europe Standard Time": // Windows (Europa Central)
+            case "Central European Standard Time": // Windows variante
+            case "Europe/Berlin":             // IANA
+            case "Europe/Vienna":             // IANA
+            case "Europe/Zurich":             // IANA
+            case "Europe/Amsterdam":          // IANA (Paises Bajos - aleman cercano)
+                return "de";
+
+            // === Ruso (ru) ===
+            case "Russian Standard Time":     // Windows
+            case "Moscow Standard Time":      // Windows
+            case "Russia Time Zone 3":        // Windows (Samara)
+            case "Russia Time Zone 10":       // Windows (Magadan)
+            case "Russia Time Zone 11":       // Windows (Kamchatka)
+            case "Ekaterinburg Standard Time":// Windows
+            case "N. Central Asia Standard Time": // Windows (Novosibirsk)
+            case "North Asia Standard Time":  // Windows (Krasnoyarsk)
+            case "North Asia East Standard Time": // Windows (Irkutsk)
+            case "Yakutsk Standard Time":     // Windows
+            case "Vladivostok Standard Time": // Windows
+            case "Europe/Moscow":             // IANA
+            case "Europe/Samara":             // IANA
+            case "Asia/Yekaterinburg":        // IANA
+            case "Asia/Novosibirsk":          // IANA
+            case "Asia/Krasnoyarsk":          // IANA
+            case "Asia/Irkutsk":              // IANA
+            case "Asia/Yakutsk":              // IANA
+            case "Asia/Vladivostok":          // IANA
+            case "Asia/Kamchatka":            // IANA
                 return "ru";
+
+            // === Portugues (pt-BR) ===
+            case "E. South America Standard Time": // Windows (Brasil)
+            case "Bahia Standard Time":       // Windows (Brasil - Bahia)
+            case "Tocantins Standard Time":   // Windows (Brasil - Tocantins)
+            case "America/Sao_Paulo":         // IANA
+            case "America/Rio_Branco":        // IANA
+            case "America/Fortaleza":         // IANA
+            case "America/Manaus":            // IANA
+            case "America/Belem":             // IANA
+            case "America/Recife":            // IANA
+            case "Europe/Lisbon":             // IANA (Portugal)
+            case "GMT Standard Time":         // Windows (Portugal/UK - ambiguo, pero pt-BR es mas util)
+                return "pt-BR";
+
+            // === Catalan (ca) ===
+            // No tiene zona horaria propia, comparte con Espana.
+            // Solo se activa por IANA si estamos en Cataluna (no hay forma real de distinguir).
+
             default:
-                return "en";
+                return null; // Sin match exacto
         }
+    }
+
+    /// <summary>
+    /// Match parcial para IDs IANA que no estan en la lista exacta.
+    /// Usa el prefijo del continente/region para adivinar.
+    /// Retorna null si no hay match.
+    /// </summary>
+    private string MatchTimeZonePartial(string tzId)
+    {
+        // Asia
+        if (tzId.StartsWith("Asia/Tokyo") || tzId.StartsWith("Japan"))
+            return "ja";
+        if (tzId.StartsWith("Asia/Seoul") || tzId.StartsWith("ROK"))
+            return "ko";
+        if (tzId.StartsWith("Asia/Shanghai") || tzId.StartsWith("PRC") ||
+            tzId.StartsWith("Asia/Chongqing") || tzId.StartsWith("Asia/Harbin"))
+            return "zh-CN";
+        if (tzId.StartsWith("Asia/Taipei") || tzId.StartsWith("ROC"))
+            return "zh-TW";
+
+        // Rusia (muchas zonas)
+        if (tzId.StartsWith("Europe/Moscow") || tzId.StartsWith("Europe/Samara") ||
+            tzId.StartsWith("Asia/Yekaterinburg") || tzId.StartsWith("Asia/Novosibirsk") ||
+            tzId.StartsWith("Asia/Omsk") || tzId.StartsWith("Asia/Krasnoyarsk") ||
+            tzId.StartsWith("Asia/Irkutsk"))
+            return "ru";
+
+        // America Latina - Espanol
+        if (tzId.StartsWith("America/Mexico") || tzId.StartsWith("America/Bogota") ||
+            tzId.StartsWith("America/Lima") || tzId.StartsWith("America/Santiago") ||
+            tzId.StartsWith("America/Argentina") || tzId.StartsWith("America/Caracas"))
+            return "es";
+
+        // Brasil
+        if (tzId.StartsWith("America/Sao_Paulo") || tzId.StartsWith("America/Fortaleza") ||
+            tzId.StartsWith("America/Manaus") || tzId.StartsWith("America/Recife") ||
+            tzId.StartsWith("Brazil"))
+            return "pt-BR";
+
+        return null;
     }
 
     // =====================================================================
@@ -250,10 +417,11 @@ public class LocalizationManager : UdonSharpBehaviour
         if (_currentLanguage == resolved) return; // Sin cambio
 
         _currentLanguage = resolved;
-        currentLanguage = resolved;
+        CacheLangDictionaries();
 
         Debug.Log($"[LocalizationManager] Idioma cambiado a: {resolved}");
         ApplyToAll();
+        NotifyListeners();
     }
 
     /// <summary>
@@ -353,6 +521,7 @@ public class LocalizationManager : UdonSharpBehaviour
     /// Obtiene la traduccion de una clave en el idioma actual.
     /// Si no existe en el idioma actual, busca en el fallback (normalmente ingles).
     /// Si tampoco existe en el fallback, devuelve la propia clave entre corchetes: [clave].
+    /// Usa cache interno del diccionario del idioma activo para rendimiento.
     /// </summary>
     public string GetValue(string key)
     {
@@ -360,23 +529,26 @@ public class LocalizationManager : UdonSharpBehaviour
         if (!Utilities.IsValid(_translationData)) return $"[{key}]";
         if (string.IsNullOrEmpty(key)) return string.Empty;
 
-        // 1. Buscar en idioma actual
-        string result = GetValueForLanguage(_currentLanguage, key);
-        if (!string.IsNullOrEmpty(result)) return result;
-
-        // 2. Buscar en idioma de fallback
-        if (_currentLanguage != fallbackLanguage)
+        // 1. Buscar en cache del idioma actual (rapido, sin lookup en _translationData)
+        if (Utilities.IsValid(_currentLangDict))
         {
-            result = GetValueForLanguage(fallbackLanguage, key);
-            if (!string.IsNullOrEmpty(result)) return result;
+            if (_currentLangDict.TryGetValue(key, out DataToken valueToken))
+                return valueToken.String;
         }
 
-        // 3. Buscar en cualquier idioma que tenga la clave (ultimo recurso)
+        // 2. Buscar en cache del fallback
+        if (Utilities.IsValid(_fallbackLangDict) && _currentLanguage != fallbackLanguage)
+        {
+            if (_fallbackLangDict.TryGetValue(key, out DataToken valueToken))
+                return valueToken.String;
+        }
+
+        // 3. Buscar en cualquier idioma que tenga la clave (ultimo recurso, sin cache)
         for (int i = 0; i < _availableLanguages.Length; i++)
         {
             if (_availableLanguages[i] == _currentLanguage) continue;
             if (_availableLanguages[i] == fallbackLanguage) continue;
-            result = GetValueForLanguage(_availableLanguages[i], key);
+            string result = GetValueForLanguage(_availableLanguages[i], key);
             if (!string.IsNullOrEmpty(result)) return result;
         }
 
@@ -385,7 +557,61 @@ public class LocalizationManager : UdonSharpBehaviour
     }
 
     /// <summary>
-    /// Busca una clave en un idioma especifico.
+    /// Obtiene la traduccion correcta segun la cantidad (pluralizacion).
+    /// Busca claves con sufijos: {key}_zero, {key}_one, {key}_other.
+    ///
+    /// Convencion:
+    ///   - {key}_zero:  cuando count == 0 (opcional, cae a _other si no existe)
+    ///   - {key}_one:   cuando count == 1
+    ///   - {key}_other: para todo lo demas (2, 3, 100, etc.)
+    ///   - Si no existen las variantes, usa {key} directamente.
+    ///
+    /// Ejemplo en JSON:
+    ///   "players_zero": "Sin jugadores"
+    ///   "players_one": "1 jugador"
+    ///   "players_other": "{n} jugadores"
+    ///
+    /// En runtime: GetPluralValue("players", 5) -> "5 jugadores"
+    /// El {n} se reemplaza automaticamente por el numero.
+    /// </summary>
+    public string GetPluralValue(string key, int count)
+    {
+        if (string.IsNullOrEmpty(key)) return string.Empty;
+
+        string pluralKey;
+        if (count == 0)
+        {
+            // Intentar _zero, si no existe usar _other
+            pluralKey = key + "_zero";
+            string zeroResult = GetValue(pluralKey);
+            if (!zeroResult.StartsWith("["))
+            {
+                return zeroResult.Replace("{n}", count.ToString());
+            }
+            pluralKey = key + "_other";
+        }
+        else if (count == 1)
+        {
+            pluralKey = key + "_one";
+        }
+        else
+        {
+            pluralKey = key + "_other";
+        }
+
+        string result = GetValue(pluralKey);
+
+        // Si no encontro la variante plural, intentar la clave base
+        if (result.StartsWith("["))
+        {
+            result = GetValue(key);
+        }
+
+        return result.Replace("{n}", count.ToString());
+    }
+
+    /// <summary>
+    /// Busca una clave en un idioma especifico (sin cache, para busqueda en cascada).
     /// </summary>
     private string GetValueForLanguage(string language, string key)
     {
@@ -404,6 +630,34 @@ public class LocalizationManager : UdonSharpBehaviour
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Cachea los diccionarios del idioma actual y fallback para evitar lookups repetidos.
+    /// Se llama en Initialize() y en SetLanguage().
+    /// </summary>
+    private void CacheLangDictionaries()
+    {
+        _currentLangDict = null;
+        _fallbackLangDict = null;
+
+        if (!Utilities.IsValid(_translationData)) return;
+
+        // Cache idioma actual
+        if (!string.IsNullOrEmpty(_currentLanguage) &&
+            _translationData.TryGetValue(_currentLanguage, out DataToken currentToken) &&
+            currentToken.TokenType == TokenType.DataDictionary)
+        {
+            _currentLangDict = currentToken.DataDictionary;
+        }
+
+        // Cache fallback
+        if (!string.IsNullOrEmpty(fallbackLanguage) && fallbackLanguage != _currentLanguage &&
+            _translationData.TryGetValue(fallbackLanguage, out DataToken fallbackToken) &&
+            fallbackToken.TokenType == TokenType.DataDictionary)
+        {
+            _fallbackLangDict = fallbackToken.DataDictionary;
+        }
     }
 
     // =====================================================================
@@ -458,11 +712,76 @@ public class LocalizationManager : UdonSharpBehaviour
         return _currentLanguage;
     }
 
+    /// <summary>Devuelve el numero de idiomas disponibles en el JSON.</summary>
+    public int GetLanguageCount()
+    {
+        return _availableLanguages != null ? _availableLanguages.Length : 0;
+    }
+
+    /// <summary>True cuando el sistema esta listo para usar.</summary>
+    public bool IsReady()
+    {
+        return _initialized && Utilities.IsValid(_translationData);
+    }
+
     /// <summary>Devuelve un array con los codigos de idioma disponibles.</summary>
     public string[] GetAvailableLanguages()
     {
         return _availableLanguages;
     }
+
+    // =====================================================================
+    // Listeners externos (mejora #8)
+    // =====================================================================
+
+    /// <summary>
+    /// Notifica a todos los listeners externos que el idioma cambio.
+    /// Los listeners reciben SendCustomEvent("_OnLanguageChanged").
+    /// </summary>
+    private void NotifyListeners()
+    {
+        if (_listeners == null) return;
+        for (int i = 0; i < _listeners.Length; i++)
+        {
+            if (Utilities.IsValid(_listeners[i]))
+            {
+                _listeners[i].SendCustomEvent("_OnLanguageChanged");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Registra un listener externo en runtime.
+    /// El listener recibira SendCustomEvent("_OnLanguageChanged") cuando cambie el idioma.
+    /// Debe tener un metodo publico "_OnLanguageChanged()" para recibir la notificacion.
+    /// Nota: Crea un nuevo array cada vez. Usar con moderacion.
+    /// </summary>
+    public void RegisterListener(UdonSharpBehaviour listener)
+    {
+        if (!Utilities.IsValid(listener)) return;
+
+        // Verificar que no este ya registrado
+        if (_listeners != null)
+        {
+            for (int i = 0; i < _listeners.Length; i++)
+            {
+                if (_listeners[i] == listener) return;
+            }
+        }
+
+        int oldLen = _listeners != null ? _listeners.Length : 0;
+        UdonSharpBehaviour[] newArr = new UdonSharpBehaviour[oldLen + 1];
+        for (int i = 0; i < oldLen; i++)
+        {
+            newArr[i] = _listeners[i];
+        }
+        newArr[oldLen] = listener;
+        _listeners = newArr;
+    }
+
+    // =====================================================================
+    // Registro de localizers
+    // =====================================================================
 
     /// <summary>
     /// Registra un TextLocalizer adicional en runtime.

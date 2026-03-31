@@ -229,6 +229,95 @@ Assets/Idiomas/
 
 ---
 
+## API Publica (para otros scripts UdonSharp)
+
+### LocalizationManager
+
+| Metodo | Descripcion |
+|--------|-------------|
+| `SetLanguage(string lang)` | Cambia el idioma activo. `null` = auto-detectar. |
+| `GetValue(string key)` | Obtiene la traduccion de una clave. Fallback en cascada. |
+| `GetPluralValue(string key, int count)` | Traduccion con pluralizacion (`_zero`, `_one`, `_other`). `{n}` se reemplaza por el numero. |
+| `GetCurrentLanguage()` | Devuelve el codigo del idioma activo (ej: `"es"`). |
+| `GetLanguageCount()` | Numero de idiomas disponibles. |
+| `GetAvailableLanguages()` | Array de codigos de idioma. |
+| `HasLanguage(string lang)` | `true` si el idioma existe en el JSON. |
+| `IsReady()` | `true` cuando el sistema esta inicializado. |
+| `RegisterListener(UdonSharpBehaviour)` | Registra un listener que recibe `_OnLanguageChanged` al cambiar idioma. |
+| `RegisterLocalizer(TextLocalizer)` | Registra un TextLocalizer en runtime. |
+| `RegisterCanvasLocalizer(CanvasLocalizer)` | Registra un CanvasLocalizer en runtime. |
+
+### TextLocalizer
+
+| Metodo | Descripcion |
+|--------|-------------|
+| `UpdateText()` | Actualiza el texto con la traduccion actual. |
+| `SetTranslationKey(string key)` | Cambia la clave en runtime. |
+| `SetParams(string p0)` | Reemplaza `{0}` en la traduccion y actualiza. |
+| `SetParams2(string p0, string p1)` | Reemplaza `{0}` y `{1}`. |
+| `SetParams3(string p0, string p1, string p2)` | Reemplaza `{0}`, `{1}` y `{2}`. |
+
+### Pluralizacion
+
+Convencion de claves en el JSON:
+
+```json
+{
+    "en": {
+        "players_zero": "No players",
+        "players_one": "1 player",
+        "players_other": "{n} players"
+    },
+    "es": {
+        "players_zero": "Sin jugadores",
+        "players_one": "1 jugador",
+        "players_other": "{n} jugadores"
+    }
+}
+```
+
+En tu script: `manager.GetPluralValue("players", count)`
+
+### Texto con parametros
+
+En el JSON: `"welcome": "Hola {0}, tienes {1} mensajes"`
+
+En tu script con TextLocalizer:
+```
+textLocalizer.SetParams2("Bender", "5");
+// Resultado: "Hola Bender, tienes 5 mensajes"
+```
+
+### Listener de cambio de idioma
+
+Para que tu script reaccione cuando el jugador cambia de idioma:
+
+1. Agrega tu UdonSharpBehaviour al array "Listeners" del LocalizationManager.
+2. Crea un metodo publico `_OnLanguageChanged()` en tu script.
+3. Se llamara automaticamente cada vez que cambie el idioma.
+
+### Exportar/Importar CSV
+
+Menu: `Tools > Idiomas > Exportar-Importar CSV`
+
+Permite exportar las traducciones a CSV para editarlas en Google Sheets o Excel,
+y luego importarlas de vuelta al JSON.
+
+---
+
+## Persistencia de seleccion de idioma
+
+Actualmente, si un jugador elige un idioma manualmente y vuelve a entrar al mundo,
+el sistema auto-detecta de nuevo. Para persistir la eleccion:
+
+1. Registra un listener con `manager.RegisterListener(this)`.
+2. En `_OnLanguageChanged()`, guarda `manager.GetCurrentLanguage()` con tu sistema de persistencia.
+3. En `Start()`, lee el idioma guardado y llama `manager.SetLanguage(idiomaGuardado)`.
+
+VRChat ofrece PlayerData para persistencia entre sesiones.
+
+---
+
 ## Compatibilidad
 
 - Unity 2022.3.x (requerido por VRChat)

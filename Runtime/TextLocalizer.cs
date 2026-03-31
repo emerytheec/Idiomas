@@ -57,6 +57,11 @@ public class TextLocalizer : UdonSharpBehaviour
 
     private bool _initialized;
 
+    // Parametros dinamicos para reemplazar {0}, {1}, {2} en la traduccion
+    private string _param0 = "";
+    private string _param1 = "";
+    private string _param2 = "";
+
     // =====================================================================
     // Inicializacion
     // =====================================================================
@@ -118,12 +123,22 @@ public class TextLocalizer : UdonSharpBehaviour
         // Obtener traduccion
         string translated = manager.GetValue(translationKey);
 
+        // Reemplazar parametros dinamicos {0}, {1}, {2}
+        if (!string.IsNullOrEmpty(_param0) && translated.Contains("{0}"))
+            translated = translated.Replace("{0}", _param0);
+        if (!string.IsNullOrEmpty(_param1) && translated.Contains("{1}"))
+            translated = translated.Replace("{1}", _param1);
+        if (!string.IsNullOrEmpty(_param2) && translated.Contains("{2}"))
+            translated = translated.Replace("{2}", _param2);
+
         // Aplicar formato rich text si esta configurado
-        if (!string.IsNullOrEmpty(richTextFormat) && richTextFormat.Contains("{0}"))
+        // Soporta {t} (recomendado) y {0} (retrocompatible) como placeholder
+        if (!string.IsNullOrEmpty(richTextFormat))
         {
-            // UdonSharp no soporta string.Format con facilidad,
-            // asi que hacemos reemplazo manual
-            translated = richTextFormat.Replace("{0}", translated);
+            if (richTextFormat.Contains("{t}"))
+                translated = richTextFormat.Replace("{t}", translated);
+            else if (richTextFormat.Contains("{0}") && string.IsNullOrEmpty(_param0))
+                translated = richTextFormat.Replace("{0}", translated);
         }
 
         // Aplicar prefijo y sufijo
@@ -167,6 +182,43 @@ public class TextLocalizer : UdonSharpBehaviour
     public void SetManager(LocalizationManager newManager)
     {
         manager = newManager;
+        UpdateText();
+    }
+
+    // =====================================================================
+    // Parametros dinamicos
+    // =====================================================================
+
+    /// <summary>
+    /// Asigna parametros dinamicos que reemplazan {0}, {1}, {2} en la traduccion.
+    /// Llama UpdateText() automaticamente despues de asignar.
+    ///
+    /// Ejemplo en JSON: "welcome": "Hola {0}, tienes {1} mensajes"
+    /// En runtime: SetParams("Bender", "5") -> "Hola Bender, tienes 5 mensajes"
+    /// </summary>
+    public void SetParams(string param0)
+    {
+        _param0 = param0 != null ? param0 : "";
+        _param1 = "";
+        _param2 = "";
+        UpdateText();
+    }
+
+    /// <summary>Asigna 2 parametros y actualiza el texto.</summary>
+    public void SetParams2(string param0, string param1)
+    {
+        _param0 = param0 != null ? param0 : "";
+        _param1 = param1 != null ? param1 : "";
+        _param2 = "";
+        UpdateText();
+    }
+
+    /// <summary>Asigna 3 parametros y actualiza el texto.</summary>
+    public void SetParams3(string param0, string param1, string param2)
+    {
+        _param0 = param0 != null ? param0 : "";
+        _param1 = param1 != null ? param1 : "";
+        _param2 = param2 != null ? param2 : "";
         UpdateText();
     }
 }

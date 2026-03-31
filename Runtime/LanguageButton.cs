@@ -3,7 +3,11 @@ using UnityEngine;
 using VRC.SDKBase;
 
 /// <summary>
-/// Boton de idioma para VRChat.
+/// [OPCIONAL/LEGACY] Boton de idioma para VRChat.
+/// Este componente es una alternativa al dropdown. No es necesario si usas
+/// el TMP_Dropdown integrado en LocalizationManager.
+///
+/// Usa este componente si prefieres tener UN BOTON POR IDIOMA en vez de un dropdown.
 /// Coloca este componente en un GameObject con Button.
 /// Al hacer clic (OnClick), cambia el idioma del LocalizationManager.
 ///
