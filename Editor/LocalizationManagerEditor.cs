@@ -5,6 +5,7 @@ using TMPro;
 using UdonSharp;
 using UdonSharpEditor;
 using System.Collections.Generic;
+using System.Text.RegularExpressions;
 using VRC.SDK3.Data;
 using VRC.Udon;
 
@@ -26,9 +27,12 @@ public class LocalizationManagerEditor : Editor
     private bool _showLocalizers = false;
     private bool _showValidation = false;
     private bool _showPreview = false;
+    private bool _showCanvasSearch = false;
     private string _previewLanguage = "en";
     private Vector2 _previewScroll;
     private Vector2 _validationScroll;
+    private Vector2 _canvasSearchScroll;
+    private List<CanvasSearchResult> _canvasSearchResults;
 
     // Cache del JSON
     private DataDictionary _cachedData;
@@ -114,6 +118,17 @@ public class LocalizationManagerEditor : Editor
                 $"Canvas: {_canvasLocalizers.arraySize}  |  " +
                 $"Textos: {_localizers.arraySize}",
                 EditorStyles.helpBox);
+        }
+
+        // === BUSCAR CANVAS SIN LOCALIZAR ===
+        EditorGUILayout.Space(5);
+        _showCanvasSearch = EditorGUILayout.Foldout(_showCanvasSearch,
+            "Buscar Canvas sin Localizar", true, EditorStyles.foldoutHeader);
+        if (_showCanvasSearch)
+        {
+            EditorGUI.indentLevel++;
+            DrawCanvasSearch();
+            EditorGUI.indentLevel--;
         }
 
         // === AUTO-TRADUCIR ===
@@ -435,6 +450,307 @@ public class LocalizationManagerEditor : Editor
         }
 
         EditorGUILayout.EndScrollView();
+    }
+
+    // =====================================================================
+    // Buscar Canvas en la escena
+    // =====================================================================
+
+    private class CanvasSearchResult
+    {
+        public GameObject gameObject;
+        public Canvas canvas;
+        public int tmpCount;
+        public int legacyCount;
+        public bool hasCanvasLocalizer;
+        public string hierarchyPath;
+        public string parentCanvasLocalizerName; // null si no tiene padre con CanvasLocalizer
+    }
+
+    private void ScanSceneForCanvas()
+    {
+        _canvasSearchResults = new List<CanvasSearchResult>();
+        Canvas[] allCanvas = FindObjectsOfType<Canvas>(true);
+
+        for (int i = 0; i < allCanvas.Length; i++)
+        {
+            Canvas canvas = allCanvas[i];
+            GameObject go = canvas.gameObject;
+
+            // Contar textos hijos
+            TextMeshProUGUI[] tmpAll = go.GetComponentsInChildren<TextMeshProUGUI>(true);
+            Text[] legacyAll = go.GetComponentsInChildren<Text>(true);
+
+            // Excluir textos que ya tengan TextLocalizer individual
+            int tmpCount = 0;
+            for (int t = 0; t < tmpAll.Length; t++)
+                if (tmpAll[t].GetComponent<TextLocalizer>() == null) tmpCount++;
+
+            int legacyCount = 0;
+            for (int t = 0; t < legacyAll.Length; t++)
+                if (legacyAll[t].GetComponent<TextLocalizer>() == null) legacyCount++;
+
+            // Verificar si ya tiene CanvasLocalizer
+            bool hasCL = go.GetComponent<CanvasLocalizer>() != null;
+
+            // Verificar si es hijo de otro Canvas con CanvasLocalizer
+            string parentCLName = null;
+            Transform parent = go.transform.parent;
+            while (parent != null)
+            {
+                CanvasLocalizer parentCL = parent.GetComponent<CanvasLocalizer>();
+                if (parentCL != null)
+                {
+                    parentCLName = parent.gameObject.name;
+                    break;
+                }
+                parent = parent.parent;
+            }
+
+            // Construir path de jerarquia
+            string path = BuildHierarchyPath(go.transform);
+
+            _canvasSearchResults.Add(new CanvasSearchResult
+            {
+                gameObject = go,
+                canvas = canvas,
+                tmpCount = tmpCount,
+                legacyCount = legacyCount,
+                hasCanvasLocalizer = hasCL,
+                hierarchyPath = path,
+                parentCanvasLocalizerName = parentCLName
+            });
+        }
+
+        // Ordenar: primero los que NO tienen CanvasLocalizer, luego los que si
+        _canvasSearchResults.Sort((a, b) =>
+        {
+            if (a.hasCanvasLocalizer != b.hasCanvasLocalizer)
+                return a.hasCanvasLocalizer ? 1 : -1;
+            return string.Compare(a.gameObject.name, b.gameObject.name);
+        });
+    }
+
+    private static string BuildHierarchyPath(Transform t)
+    {
+        string path = t.name;
+        Transform parent = t.parent;
+        while (parent != null)
+        {
+            path = parent.name + "/" + path;
+            parent = parent.parent;
+        }
+        return path;
+    }
+
+    private static string NormalizeCanvasId(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return "";
+        name = Regex.Replace(name, @"\s*\(Clone\)\s*$", "");
+        name = Regex.Replace(name, @"\s*\(\d+\)\s*$", "");
+        name = name.ToLower();
+        name = Regex.Replace(name, @"[\s\-\.\,\;\:\+\=]+", "_");
+        name = Regex.Replace(name, @"[^a-z0-9_]", "");
+        name = Regex.Replace(name, @"_+", "_");
+        name = name.Trim('_');
+        return name;
+    }
+
+    private void DrawCanvasSearch()
+    {
+        EditorGUILayout.Space(3);
+        GUI.backgroundColor = new Color(0.9f, 0.8f, 0.3f);
+        if (GUILayout.Button("Escanear Escena", GUILayout.Height(24)))
+        {
+            ScanSceneForCanvas();
+        }
+        GUI.backgroundColor = Color.white;
+
+        if (_canvasSearchResults == null)
+        {
+            EditorGUILayout.HelpBox(
+                "Pulsa \"Escanear Escena\" para buscar Canvas que puedan necesitar localizacion.",
+                MessageType.Info);
+            return;
+        }
+
+        if (_canvasSearchResults.Count == 0)
+        {
+            EditorGUILayout.HelpBox("No se encontraron Canvas en la escena.", MessageType.Info);
+            return;
+        }
+
+        // Contar candidatos vs ya localizados
+        int candidates = 0;
+        int alreadyLocalized = 0;
+        int noTexts = 0;
+        for (int i = 0; i < _canvasSearchResults.Count; i++)
+        {
+            if (_canvasSearchResults[i].hasCanvasLocalizer) alreadyLocalized++;
+            else if (_canvasSearchResults[i].tmpCount + _canvasSearchResults[i].legacyCount == 0) noTexts++;
+            else candidates++;
+        }
+
+        EditorGUILayout.LabelField(
+            $"Encontrados: {_canvasSearchResults.Count} Canvas  |  " +
+            $"{candidates} candidatos  |  {alreadyLocalized} ya localizados  |  {noTexts} sin textos",
+            EditorStyles.helpBox);
+
+        EditorGUILayout.Space(3);
+        _canvasSearchScroll = EditorGUILayout.BeginScrollView(_canvasSearchScroll, GUILayout.MaxHeight(350));
+
+        // --- Candidatos (sin CanvasLocalizer, con textos) ---
+        for (int i = 0; i < _canvasSearchResults.Count; i++)
+        {
+            CanvasSearchResult r = _canvasSearchResults[i];
+            if (r.hasCanvasLocalizer) continue;
+            int totalTexts = r.tmpCount + r.legacyCount;
+            if (totalTexts == 0) continue;
+
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+
+            EditorGUILayout.BeginHorizontal();
+
+            // Nombre clickable para seleccionar en jerarquia
+            GUIStyle linkStyle = new GUIStyle(EditorStyles.label);
+            linkStyle.fontStyle = FontStyle.Bold;
+            linkStyle.normal.textColor = new Color(0.3f, 0.6f, 1f);
+            if (GUILayout.Button(r.gameObject.name, linkStyle, GUILayout.ExpandWidth(false)))
+            {
+                Selection.activeGameObject = r.gameObject;
+                EditorGUIUtility.PingObject(r.gameObject);
+            }
+
+            // Conteo de textos
+            string textsInfo = "";
+            if (r.tmpCount > 0) textsInfo += $"{r.tmpCount} TMP";
+            if (r.legacyCount > 0)
+            {
+                if (textsInfo.Length > 0) textsInfo += " + ";
+                textsInfo += $"{r.legacyCount} Legacy";
+            }
+            EditorGUILayout.LabelField(textsInfo, GUILayout.Width(120));
+
+            // Boton para anadir CanvasLocalizer
+            GUI.backgroundColor = new Color(0.4f, 0.9f, 0.4f);
+            if (GUILayout.Button("Anadir CanvasLocalizer", GUILayout.Width(170)))
+            {
+                AddCanvasLocalizerTo(r);
+            }
+            GUI.backgroundColor = Color.white;
+
+            EditorGUILayout.EndHorizontal();
+
+            // Path de jerarquia (en gris, mas pequeno)
+            GUIStyle pathStyle = new GUIStyle(EditorStyles.miniLabel);
+            pathStyle.normal.textColor = Color.gray;
+            EditorGUILayout.LabelField(r.hierarchyPath, pathStyle);
+
+            // Aviso si es hijo de otro Canvas con CanvasLocalizer
+            if (r.parentCanvasLocalizerName != null)
+            {
+                EditorGUILayout.HelpBox(
+                    $"Es hijo de \"{r.parentCanvasLocalizerName}\" que ya tiene CanvasLocalizer. " +
+                    "Sus textos podrian estar cubiertos por el padre.",
+                    MessageType.Warning);
+            }
+
+            EditorGUILayout.EndVertical();
+        }
+
+        // --- Ya localizados (con CanvasLocalizer) ---
+        bool hasLocalized = false;
+        for (int i = 0; i < _canvasSearchResults.Count; i++)
+        {
+            CanvasSearchResult r = _canvasSearchResults[i];
+            if (!r.hasCanvasLocalizer) continue;
+
+            if (!hasLocalized)
+            {
+                EditorGUILayout.Space(5);
+                EditorGUILayout.LabelField("Ya localizados:", EditorStyles.boldLabel);
+                hasLocalized = true;
+            }
+
+            EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
+
+            GUIStyle greenStyle = new GUIStyle(EditorStyles.label);
+            greenStyle.normal.textColor = new Color(0.2f, 0.7f, 0.2f);
+            if (GUILayout.Button(r.gameObject.name, greenStyle, GUILayout.ExpandWidth(false)))
+            {
+                Selection.activeGameObject = r.gameObject;
+                EditorGUIUtility.PingObject(r.gameObject);
+            }
+
+            CanvasLocalizer cl = r.gameObject.GetComponent<CanvasLocalizer>();
+            string clId = cl != null ? cl.GetCanvasId() : "";
+            EditorGUILayout.LabelField(
+                $"canvasId: \"{clId}\"  |  {r.tmpCount + r.legacyCount} textos",
+                EditorStyles.miniLabel);
+
+            EditorGUILayout.EndHorizontal();
+        }
+
+        // --- Sin textos ---
+        bool hasEmpty = false;
+        for (int i = 0; i < _canvasSearchResults.Count; i++)
+        {
+            CanvasSearchResult r = _canvasSearchResults[i];
+            if (r.hasCanvasLocalizer) continue;
+            if (r.tmpCount + r.legacyCount > 0) continue;
+
+            if (!hasEmpty)
+            {
+                EditorGUILayout.Space(5);
+                EditorGUILayout.LabelField("Sin textos (no necesitan localizacion):", EditorStyles.miniLabel);
+                hasEmpty = true;
+            }
+
+            GUIStyle grayStyle = new GUIStyle(EditorStyles.miniLabel);
+            grayStyle.normal.textColor = Color.gray;
+            EditorGUILayout.LabelField($"  {r.gameObject.name}", grayStyle);
+        }
+
+        EditorGUILayout.EndScrollView();
+    }
+
+    private void AddCanvasLocalizerTo(CanvasSearchResult result)
+    {
+        LocalizationManager mgr = (LocalizationManager)target;
+        GameObject go = result.gameObject;
+
+        // Usar UdonSharpUndo para soporte de Ctrl+Z
+        CanvasLocalizer newCL = UdonSharpUndo.AddComponent<CanvasLocalizer>(go);
+
+        if (newCL == null)
+        {
+            EditorUtility.DisplayDialog("Error",
+                "No se pudo anadir el componente CanvasLocalizer.\n" +
+                "Asegurate de que UdonSharp esta correctamente instalado.",
+                "OK");
+            return;
+        }
+
+        // Asignar el LocalizationManager y el canvasId sugerido
+        SerializedObject clSO = new SerializedObject(newCL);
+        SerializedProperty mgrProp = clSO.FindProperty("manager");
+        SerializedProperty idProp = clSO.FindProperty("canvasId");
+
+        if (mgrProp != null) mgrProp.objectReferenceValue = mgr;
+        if (idProp != null) idProp.stringValue = NormalizeCanvasId(go.name);
+
+        clSO.ApplyModifiedProperties();
+
+        // Marcar resultado como ya localizado
+        result.hasCanvasLocalizer = true;
+
+        EditorUtility.SetDirty(go);
+
+        Debug.Log($"[Idiomas] CanvasLocalizer anadido a \"{go.name}\" con canvasId=\"{NormalizeCanvasId(go.name)}\".");
+
+        // Seleccionar el objeto para que el usuario vea el nuevo componente
+        Selection.activeGameObject = go;
+        EditorGUIUtility.PingObject(go);
     }
 
     // =====================================================================
