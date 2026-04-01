@@ -30,30 +30,24 @@ public class LocalizationManager : UdonSharpBehaviour
     // Configuracion (Inspector)
     // =====================================================================
 
-    [Header("Datos de Traduccion")]
     [Tooltip("Archivo JSON con las traducciones. Formato: { \"en\": { \"key\": \"value\" }, ... }")]
     [SerializeField] private TextAsset translationFile;
 
-    [Header("Idioma por Defecto")]
     [Tooltip("Idioma de fallback si el idioma del jugador no existe en el JSON. Normalmente 'en'.")]
     [SerializeField] private string fallbackLanguage = "en";
 
-    [Header("Componentes Localizados")]
     [Tooltip("Todos los TextLocalizer de la escena. Usar el boton 'Auto-buscar' del Inspector.")]
     [SerializeField] private TextLocalizer[] localizers = new TextLocalizer[0];
 
-    [Header("Canvas Localizados")]
     [Tooltip("CanvasLocalizer que gestionan canvas completos. Usar el boton 'Auto-buscar' del Inspector.")]
     [SerializeField] private CanvasLocalizer[] canvasLocalizers = new CanvasLocalizer[0];
 
-    [Header("Selector de Idioma (Dropdown)")]
     [Tooltip("TMP_Dropdown para cambiar idioma. Opcional. Se configura automaticamente al crear el selector.")]
     [SerializeField] private TMPro.TMP_Dropdown _languageDropdown;
 
-    [Tooltip("Codigos de idioma en el MISMO ORDEN que las opciones del dropdown. Vacio = auto-detectar.")]
+    [Tooltip("Codigos de idioma en el MISMO ORDEN que las opciones del dropdown.")]
     [SerializeField] private string[] _dropdownLanguageCodes = new string[0];
 
-    [Header("Listeners (Opcional)")]
     [Tooltip("UdonSharpBehaviours que reciben '_OnLanguageChanged' cuando cambia el idioma.\n" +
              "Util para scripts externos que necesitan reaccionar al cambio (cambiar imagenes, etc).")]
     [SerializeField] private UdonSharpBehaviour[] _listeners = new UdonSharpBehaviour[0];

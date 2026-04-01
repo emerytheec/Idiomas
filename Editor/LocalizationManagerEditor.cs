@@ -10,7 +10,8 @@ using VRC.SDK3.Data;
 using VRC.Udon;
 
 /// <summary>
-/// Inspector simplificado para LocalizationManager.
+/// Inspector personalizado para LocalizationManager.
+/// Orden visual: Config basica > Estadisticas > Dropdown > Listeners > Localizers > Canvas > Herramientas
 /// </summary>
 [CustomEditor(typeof(LocalizationManager))]
 public class LocalizationManagerEditor : Editor
@@ -22,23 +23,36 @@ public class LocalizationManagerEditor : Editor
     private SerializedProperty _canvasLocalizers;
     private SerializedProperty _languageDropdown;
     private SerializedProperty _dropdownLanguageCodes;
+    private SerializedProperty _listeners;
 
-    // Estado del editor
+    // Estado del editor (foldouts)
     private bool _showLocalizers = false;
+    private bool _showCanvasSearch = true;
+    private bool _showTools = false;
+    private bool _showListeners = false;
+    private bool _showDropdown = false;
     private bool _showValidation = false;
     private bool _showPreview = false;
-    private bool _showCanvasSearch = false;
     private string _previewLanguage = "en";
     private Vector2 _previewScroll;
     private Vector2 _validationScroll;
     private Vector2 _canvasSearchScroll;
-    private List<CanvasSearchResult> _canvasSearchResults;
+    private static List<CanvasSearchResult> _canvasSearchResults;
 
     // Cache del JSON
     private DataDictionary _cachedData;
     private string _cachedJsonHash;
     private string[] _cachedLanguages;
     private string[] _cachedKeys;
+
+    // Cache de validacion (bajo demanda)
+    private List<string> _validationMessages;
+    private List<int> _validationMessageTypes; // 0=info, 1=warning
+    private int _validationWarningCount;
+    private int _validationTodoCount;
+    private int _validationEmptyCount;
+    private bool _validationIncludesFullCheck;
+    private bool _validationExecuted;
 
     private void OnEnable()
     {
@@ -48,10 +62,14 @@ public class LocalizationManagerEditor : Editor
         _canvasLocalizers = serializedObject.FindProperty("canvasLocalizers");
         _languageDropdown = serializedObject.FindProperty("_languageDropdown");
         _dropdownLanguageCodes = serializedObject.FindProperty("_dropdownLanguageCodes");
+        _listeners = serializedObject.FindProperty("_listeners");
     }
 
     public override void OnInspectorGUI()
     {
+        // Cabecera estandar de UdonSharp (program asset, sync settings, etc.)
+        if (UdonSharpGUI.DrawDefaultUdonSharpBehaviourHeader(target)) return;
+
         serializedObject.Update();
 
         // === TITULO ===
@@ -67,56 +85,17 @@ public class LocalizationManagerEditor : Editor
 
         RefreshCache();
 
-        // === DROPDOWN DE IDIOMA ===
-        EditorGUILayout.Space(8);
-        EditorGUILayout.LabelField("Selector de Idioma (Dropdown)", EditorStyles.boldLabel);
-        EditorGUILayout.PropertyField(_languageDropdown,
-            new GUIContent("Dropdown",
-                "Arrastra aqui el TMP_Dropdown del selector de idioma."));
-        EditorGUILayout.PropertyField(_dropdownLanguageCodes,
-            new GUIContent("Codigos de Idioma",
-                "Misma cantidad y orden que las opciones del dropdown.\n" +
-                "Dejar vacio = auto-detectar."), true);
-
-        // Boton para cablear OnValueChanged
-        if (_languageDropdown.objectReferenceValue != null)
-        {
-            TMP_Dropdown dd = _languageDropdown.objectReferenceValue as TMP_Dropdown;
-            if (dd != null)
-            {
-                SerializedObject ddSO = new SerializedObject(dd);
-                SerializedProperty onVal = ddSO.FindProperty("m_OnValueChanged");
-                SerializedProperty calls = onVal.FindPropertyRelative("m_PersistentCalls.m_Calls");
-
-                if (calls.arraySize == 0)
-                {
-                    EditorGUILayout.Space(3);
-                    GUI.backgroundColor = new Color(1f, 0.85f, 0.3f);
-                    if (GUILayout.Button("Conectar Dropdown (OnValueChanged)", GUILayout.Height(26)))
-                    {
-                        WireDropdown(dd);
-                    }
-                    GUI.backgroundColor = Color.white;
-                    EditorGUILayout.HelpBox(
-                        "El dropdown no esta conectado. Pulsa el boton para conectarlo automaticamente.",
-                        MessageType.Warning);
-                }
-                else
-                {
-                    EditorGUILayout.HelpBox("Dropdown conectado.", MessageType.Info);
-                }
-            }
-        }
-
         // === ESTADISTICAS ===
         EditorGUILayout.Space(8);
         if (_cachedLanguages != null && _cachedLanguages.Length > 0)
         {
+            int listenerCount = _listeners != null ? _listeners.arraySize : 0;
             EditorGUILayout.LabelField(
                 $"Idiomas: {_cachedLanguages.Length} ({string.Join(", ", _cachedLanguages)})  |  " +
                 $"Claves: {(_cachedKeys != null ? _cachedKeys.Length : 0)}  |  " +
                 $"Canvas: {_canvasLocalizers.arraySize}  |  " +
-                $"Textos: {_localizers.arraySize}",
+                $"Textos: {_localizers.arraySize}  |  " +
+                $"Listeners: {listenerCount}",
                 EditorStyles.helpBox);
         }
 
@@ -131,14 +110,43 @@ public class LocalizationManagerEditor : Editor
             EditorGUI.indentLevel--;
         }
 
-        // === AUTO-TRADUCIR ===
+        // === HERRAMIENTAS (colapsado por defecto) ===
         EditorGUILayout.Space(5);
-        GUI.backgroundColor = new Color(0.3f, 0.7f, 1f);
-        if (GUILayout.Button("Auto-Traducir Idiomas Faltantes", GUILayout.Height(26)))
+        _showTools = EditorGUILayout.Foldout(_showTools,
+            "Herramientas", true, EditorStyles.foldoutHeader);
+        if (_showTools)
         {
-            OpenAutoTranslateWindow();
+            EditorGUI.indentLevel++;
+
+            // Auto-Traducir
+            EditorGUILayout.Space(3);
+            GUI.backgroundColor = new Color(0.3f, 0.7f, 1f);
+            if (GUILayout.Button("Auto-Traducir Idiomas Faltantes", GUILayout.Height(24)))
+            {
+                OpenAutoTranslateWindow();
+            }
+            GUI.backgroundColor = Color.white;
+
+            // Validacion de Claves
+            EditorGUILayout.Space(5);
+            _showValidation = EditorGUILayout.Foldout(_showValidation,
+                "Validacion de Claves", true);
+            if (_showValidation)
+            {
+                DrawValidation();
+            }
+
+            // Vista Previa de Traducciones
+            EditorGUILayout.Space(3);
+            _showPreview = EditorGUILayout.Foldout(_showPreview,
+                "Vista Previa de Traducciones", true);
+            if (_showPreview)
+            {
+                DrawPreview();
+            }
+
+            EditorGUI.indentLevel--;
         }
-        GUI.backgroundColor = Color.white;
 
         // === LOCALIZERS (colapsado por defecto) ===
         EditorGUILayout.Space(5);
@@ -159,25 +167,88 @@ public class LocalizationManagerEditor : Editor
             EditorGUI.indentLevel--;
         }
 
-        // === VALIDACION ===
-        EditorGUILayout.Space(3);
-        _showValidation = EditorGUILayout.Foldout(_showValidation,
-            "Validacion de Claves", true, EditorStyles.foldoutHeader);
-        if (_showValidation)
+        // === LISTENERS (colapsado por defecto) ===
+        EditorGUILayout.Space(5);
+        _showListeners = EditorGUILayout.Foldout(_showListeners,
+            $"Listeners ({(_listeners != null ? _listeners.arraySize : 0)})",
+            true, EditorStyles.foldoutHeader);
+        if (_showListeners)
         {
             EditorGUI.indentLevel++;
-            DrawValidation();
+
+            EditorGUILayout.HelpBox(
+                "Arrastra aqui scripts de tu mundo que necesiten saber cuando cambia el idioma.\n\n" +
+                "Ejemplo: un script que cambia imagenes segun el idioma, o que reproduce un audio diferente. " +
+                "Cada script debe tener un metodo publico llamado \"_OnLanguageChanged()\" para recibir el aviso.\n\n" +
+                "Si todos tus textos se traducen automaticamente con TextLocalizer o CanvasLocalizer, " +
+                "no necesitas poner nada aqui.",
+                MessageType.Info);
+
+            EditorGUILayout.Space(3);
+            EditorGUILayout.PropertyField(_listeners,
+                new GUIContent("Listeners"), true);
+
             EditorGUI.indentLevel--;
         }
 
-        // === VISTA PREVIA ===
-        EditorGUILayout.Space(3);
-        _showPreview = EditorGUILayout.Foldout(_showPreview,
-            "Vista Previa de Traducciones", true, EditorStyles.foldoutHeader);
-        if (_showPreview)
+        // === SELECTOR DE IDIOMA - DROPDOWN (colapsado por defecto) ===
+        EditorGUILayout.Space(5);
+        _showDropdown = EditorGUILayout.Foldout(_showDropdown,
+            "Selector de Idioma (Dropdown)", true, EditorStyles.foldoutHeader);
+        if (_showDropdown)
         {
             EditorGUI.indentLevel++;
-            DrawPreview();
+
+            EditorGUILayout.HelpBox(
+                "Esta seccion solo es necesaria si tu mundo tiene un menu desplegable (Dropdown) " +
+                "para que los jugadores cambien el idioma manualmente.\n\n" +
+                "Si no usas dropdown, el idioma se detecta automaticamente y puedes ignorar esta seccion.",
+                MessageType.Info);
+
+            EditorGUILayout.Space(3);
+            EditorGUILayout.PropertyField(_languageDropdown,
+                new GUIContent("Dropdown",
+                    "Arrastra aqui el TMP_Dropdown del selector de idioma."));
+
+            if (_languageDropdown.objectReferenceValue != null)
+            {
+                EditorGUILayout.Space(3);
+                EditorGUILayout.HelpBox(
+                    "Codigos de Idioma: cada codigo debe coincidir con la opcion del dropdown en el mismo orden.\n" +
+                    "Ejemplo: si el dropdown tiene [English, Espanol, Japanese], los codigos serian [en, es, ja].",
+                    MessageType.None);
+
+                EditorGUILayout.PropertyField(_dropdownLanguageCodes,
+                    new GUIContent("Codigos de Idioma"), true);
+
+                TMP_Dropdown dd = _languageDropdown.objectReferenceValue as TMP_Dropdown;
+                if (dd != null)
+                {
+                    SerializedObject ddSO = new SerializedObject(dd);
+                    SerializedProperty onVal = ddSO.FindProperty("m_OnValueChanged");
+                    SerializedProperty calls = onVal.FindPropertyRelative("m_PersistentCalls.m_Calls");
+
+                    if (calls.arraySize == 0)
+                    {
+                        EditorGUILayout.Space(3);
+                        GUI.backgroundColor = new Color(1f, 0.85f, 0.3f);
+                        if (GUILayout.Button("Conectar Dropdown (OnValueChanged)", GUILayout.Height(26)))
+                        {
+                            WireDropdown(dd);
+                        }
+                        GUI.backgroundColor = Color.white;
+                        EditorGUILayout.HelpBox(
+                            "El dropdown no esta conectado al LocalizationManager. " +
+                            "Pulsa el boton para conectarlo automaticamente.",
+                            MessageType.Warning);
+                    }
+                    else
+                    {
+                        EditorGUILayout.HelpBox("Dropdown conectado correctamente.", MessageType.Info);
+                    }
+                }
+            }
+
             EditorGUI.indentLevel--;
         }
 
@@ -230,7 +301,7 @@ public class LocalizationManagerEditor : Editor
         LocalizationManager mgr = (LocalizationManager)target;
 
         // TextLocalizers
-        TextLocalizer[] allTL = FindObjectsOfType<TextLocalizer>();
+        TextLocalizer[] allTL = FindObjectsByType<TextLocalizer>(FindObjectsSortMode.None);
         List<TextLocalizer> matchTL = new List<TextLocalizer>();
         for (int i = 0; i < allTL.Length; i++)
         {
@@ -242,7 +313,7 @@ public class LocalizationManagerEditor : Editor
             _localizers.GetArrayElementAtIndex(i).objectReferenceValue = matchTL[i];
 
         // CanvasLocalizers
-        CanvasLocalizer[] allCL = FindObjectsOfType<CanvasLocalizer>();
+        CanvasLocalizer[] allCL = FindObjectsByType<CanvasLocalizer>(FindObjectsSortMode.None);
         List<CanvasLocalizer> matchCL = new List<CanvasLocalizer>();
         for (int i = 0; i < allCL.Length; i++)
         {
@@ -275,7 +346,7 @@ public class LocalizationManagerEditor : Editor
     }
 
     // =====================================================================
-    // Validacion
+    // Validacion (bajo demanda, con cache de resultados)
     // =====================================================================
 
     private void DrawValidation()
@@ -286,18 +357,76 @@ public class LocalizationManagerEditor : Editor
             return;
         }
 
-        // Boton de verificacion completa
-        if (GUILayout.Button("Verificar Integridad del JSON"))
+        // Botones de validacion
+        EditorGUILayout.BeginHorizontal();
+        if (GUILayout.Button("Verificar Claves de Localizers"))
         {
-            _forceFullValidation = true;
+            RunValidation(false);
+        }
+        if (GUILayout.Button("Verificar Integridad Completa"))
+        {
+            RunValidation(true);
+        }
+        EditorGUILayout.EndHorizontal();
+
+        // Mostrar resultados cacheados
+        if (!_validationExecuted)
+        {
+            EditorGUILayout.HelpBox(
+                "Pulsa un boton para ejecutar la validacion.",
+                MessageType.Info);
+            return;
+        }
+
+        if (_validationMessages == null || _validationMessages.Count == 0)
+        {
+            EditorGUILayout.HelpBox(
+                _validationIncludesFullCheck
+                    ? "Sin problemas. Todas las claves existen en todos los idiomas, sin [TODO:] ni vacios."
+                    : "Todas las claves de los localizers existen en todos los idiomas.",
+                MessageType.Info);
+            return;
         }
 
         _validationScroll = EditorGUILayout.BeginScrollView(_validationScroll, GUILayout.MaxHeight(300));
-        int warnings = 0;
-        int todoCount = 0;
-        int emptyCount = 0;
+
+        for (int i = 0; i < _validationMessages.Count; i++)
+        {
+            MessageType msgType = _validationMessageTypes[i] == 1 ? MessageType.Warning : MessageType.Info;
+            EditorGUILayout.HelpBox(_validationMessages[i], msgType);
+        }
+
+        // Resumen
+        if (_validationIncludesFullCheck)
+        {
+            EditorGUILayout.Space(3);
+            EditorGUILayout.LabelField(
+                $"Resumen: {_validationWarningCount} faltantes, {_validationTodoCount} [TODO:], {_validationEmptyCount} vacios",
+                EditorStyles.helpBox);
+        }
+        else if (_validationWarningCount > 0)
+        {
+            EditorGUILayout.Space(3);
+            EditorGUILayout.LabelField(
+                $"Resumen: {_validationWarningCount} claves faltantes",
+                EditorStyles.helpBox);
+        }
+
+        EditorGUILayout.EndScrollView();
+    }
+
+    private void RunValidation(bool fullCheck)
+    {
+        _validationMessages = new List<string>();
+        _validationMessageTypes = new List<int>();
+        _validationWarningCount = 0;
+        _validationTodoCount = 0;
+        _validationEmptyCount = 0;
+        _validationIncludesFullCheck = fullCheck;
+        _validationExecuted = true;
 
         // --- Verificar claves faltantes en localizers ---
+
         // TextLocalizers
         for (int i = 0; i < _localizers.arraySize; i++)
         {
@@ -307,7 +436,7 @@ public class LocalizationManagerEditor : Editor
             if (tl == null) continue;
             string key = tl.GetTranslationKey();
             if (string.IsNullOrEmpty(key)) continue;
-            CheckKey(tl.gameObject.name, key, ref warnings);
+            CheckKeyCached(tl.gameObject.name, key);
         }
 
         // CanvasLocalizers
@@ -323,7 +452,7 @@ public class LocalizationManagerEditor : Editor
                 for (int k = 0; k < tmpKeys.arraySize; k++)
                 {
                     string key = tmpKeys.GetArrayElementAtIndex(k).stringValue;
-                    if (!string.IsNullOrEmpty(key)) CheckKey(clName, key, ref warnings);
+                    if (!string.IsNullOrEmpty(key)) CheckKeyCached(clName, key);
                 }
 
             SerializedProperty legKeys = clSO.FindProperty("legacyKeys");
@@ -331,12 +460,12 @@ public class LocalizationManagerEditor : Editor
                 for (int k = 0; k < legKeys.arraySize; k++)
                 {
                     string key = legKeys.GetArrayElementAtIndex(k).stringValue;
-                    if (!string.IsNullOrEmpty(key)) CheckKey(clName, key, ref warnings);
+                    if (!string.IsNullOrEmpty(key)) CheckKeyCached(clName, key);
                 }
         }
 
         // --- Verificacion completa del JSON (traducciones [TODO:] y vacias) ---
-        if (_forceFullValidation)
+        if (fullCheck)
         {
             for (int i = 0; i < _cachedLanguages.Length; i++)
             {
@@ -354,46 +483,22 @@ public class LocalizationManagerEditor : Editor
 
                     if (value.StartsWith("[TODO:"))
                     {
-                        EditorGUILayout.HelpBox(
-                            $"[TODO] '{lang}' > '{key}': {value}",
-                            MessageType.Warning);
-                        todoCount++;
+                        _validationMessages.Add($"[TODO] '{lang}' > '{key}': {value}");
+                        _validationMessageTypes.Add(1);
+                        _validationTodoCount++;
                     }
                     else if (string.IsNullOrEmpty(value) || string.IsNullOrWhiteSpace(value))
                     {
-                        EditorGUILayout.HelpBox(
-                            $"[VACIO] '{lang}' > '{key}'",
-                            MessageType.Warning);
-                        emptyCount++;
+                        _validationMessages.Add($"[VACIO] '{lang}' > '{key}'");
+                        _validationMessageTypes.Add(1);
+                        _validationEmptyCount++;
                     }
                 }
             }
         }
-
-        // --- Resumen ---
-        int totalIssues = warnings + todoCount + emptyCount;
-        if (totalIssues == 0)
-        {
-            EditorGUILayout.HelpBox(
-                _forceFullValidation
-                    ? "Sin problemas. Todas las claves existen en todos los idiomas, sin [TODO:] ni vacios."
-                    : "Todas las claves de los localizers existen en todos los idiomas.",
-                MessageType.Info);
-        }
-        else if (_forceFullValidation)
-        {
-            EditorGUILayout.Space(3);
-            EditorGUILayout.LabelField(
-                $"Resumen: {warnings} faltantes, {todoCount} [TODO:], {emptyCount} vacios",
-                EditorStyles.helpBox);
-        }
-
-        EditorGUILayout.EndScrollView();
     }
 
-    private bool _forceFullValidation;
-
-    private void CheckKey(string owner, string key, ref int warnings)
+    private void CheckKeyCached(string owner, string key)
     {
         for (int j = 0; j < _cachedLanguages.Length; j++)
         {
@@ -401,10 +506,9 @@ public class LocalizationManagerEditor : Editor
                 lt.TokenType == TokenType.DataDictionary &&
                 !lt.DataDictionary.ContainsKey(key))
             {
-                EditorGUILayout.HelpBox(
-                    $"'{owner}': '{key}' falta en '{_cachedLanguages[j]}'",
-                    MessageType.Warning);
-                warnings++;
+                _validationMessages.Add($"'{owner}': '{key}' falta en '{_cachedLanguages[j]}'");
+                _validationMessageTypes.Add(1);
+                _validationWarningCount++;
             }
         }
     }
@@ -464,13 +568,13 @@ public class LocalizationManagerEditor : Editor
         public int legacyCount;
         public bool hasCanvasLocalizer;
         public string hierarchyPath;
-        public string parentCanvasLocalizerName; // null si no tiene padre con CanvasLocalizer
+        public string parentCanvasLocalizerName;
     }
 
     private void ScanSceneForCanvas()
     {
         _canvasSearchResults = new List<CanvasSearchResult>();
-        Canvas[] allCanvas = FindObjectsOfType<Canvas>(true);
+        Canvas[] allCanvas = FindObjectsByType<Canvas>(FindObjectsInactive.Include, FindObjectsSortMode.None);
 
         for (int i = 0; i < allCanvas.Length; i++)
         {
@@ -569,7 +673,7 @@ public class LocalizationManagerEditor : Editor
         if (_canvasSearchResults == null)
         {
             EditorGUILayout.HelpBox(
-                "Pulsa \"Escanear Escena\" para buscar Canvas que puedan necesitar localizacion.",
+                "Pulsa \"Escanear Escena\" para buscar Canvas que necesiten localizacion.",
                 MessageType.Info);
             return;
         }
@@ -617,7 +721,6 @@ public class LocalizationManagerEditor : Editor
             linkStyle.normal.textColor = new Color(0.3f, 0.6f, 1f);
             if (GUILayout.Button(r.gameObject.name, linkStyle, GUILayout.ExpandWidth(false)))
             {
-                Selection.activeGameObject = r.gameObject;
                 EditorGUIUtility.PingObject(r.gameObject);
             }
 
@@ -630,6 +733,9 @@ public class LocalizationManagerEditor : Editor
                 textsInfo += $"{r.legacyCount} Legacy";
             }
             EditorGUILayout.LabelField(textsInfo, GUILayout.Width(120));
+
+            // Empujar boton a la derecha
+            GUILayout.FlexibleSpace();
 
             // Boton para anadir CanvasLocalizer
             GUI.backgroundColor = new Color(0.4f, 0.9f, 0.4f);
@@ -678,7 +784,6 @@ public class LocalizationManagerEditor : Editor
             greenStyle.normal.textColor = new Color(0.2f, 0.7f, 0.2f);
             if (GUILayout.Button(r.gameObject.name, greenStyle, GUILayout.ExpandWidth(false)))
             {
-                Selection.activeGameObject = r.gameObject;
                 EditorGUIUtility.PingObject(r.gameObject);
             }
 
@@ -687,6 +792,14 @@ public class LocalizationManagerEditor : Editor
             EditorGUILayout.LabelField(
                 $"canvasId: \"{clId}\"  |  {r.tmpCount + r.legacyCount} textos",
                 EditorStyles.miniLabel);
+
+            // Boton para quitar CanvasLocalizer
+            GUI.backgroundColor = new Color(1f, 0.4f, 0.4f);
+            if (GUILayout.Button("Quitar", GUILayout.Width(60)))
+            {
+                RemoveCanvasLocalizerFrom(r);
+            }
+            GUI.backgroundColor = Color.white;
 
             EditorGUILayout.EndHorizontal();
         }
@@ -712,6 +825,46 @@ public class LocalizationManagerEditor : Editor
         }
 
         EditorGUILayout.EndScrollView();
+    }
+
+    private void RemoveCanvasLocalizerFrom(CanvasSearchResult result)
+    {
+        GameObject go = result.gameObject;
+        CanvasLocalizer cl = go.GetComponent<CanvasLocalizer>();
+        if (cl == null) return;
+
+        string canvasId = cl.GetCanvasId();
+        if (!EditorUtility.DisplayDialog("Quitar CanvasLocalizer",
+            $"Quitar CanvasLocalizer de \"{go.name}\"?\n" +
+            $"(canvasId: \"{canvasId}\")\n\n" +
+            "Puedes deshacerlo con Ctrl+Z.",
+            "Quitar", "Cancelar"))
+        {
+            return;
+        }
+
+        // Quitar de la lista de canvasLocalizers del manager
+        for (int i = 0; i < _canvasLocalizers.arraySize; i++)
+        {
+            if (_canvasLocalizers.GetArrayElementAtIndex(i).objectReferenceValue == cl)
+            {
+                // En Unity, si el slot tiene referencia, el primer DeleteArrayElement solo lo pone a null
+                _canvasLocalizers.GetArrayElementAtIndex(i).objectReferenceValue = null;
+                _canvasLocalizers.DeleteArrayElementAtIndex(i);
+                serializedObject.ApplyModifiedProperties();
+                break;
+            }
+        }
+
+        // Quitar el UdonBehaviour asociado (backing) y luego el componente C#
+        UdonBehaviour udon = FindUdonBehaviourFor(cl);
+        if (udon != null) Undo.DestroyObjectImmediate(udon);
+        Undo.DestroyObjectImmediate(cl);
+
+        result.hasCanvasLocalizer = false;
+        EditorUtility.SetDirty(go);
+
+        Debug.Log($"[Idiomas] CanvasLocalizer quitado de \"{go.name}\".");
     }
 
     private void AddCanvasLocalizerTo(CanvasSearchResult result)
