@@ -85,6 +85,25 @@ public class LocalizationManagerEditor : Editor
 
         RefreshCache();
 
+        // === VERIFICACION DE FONTS TMP ===
+        if (!IdiomasFontSetup.AreFontsConfigured())
+        {
+            EditorGUILayout.Space(5);
+            EditorGUILayout.HelpBox(
+                "Las fallback fonts CJK/cirilico no estan configuradas en TMP Settings.\n" +
+                "Los caracteres en japones, coreano, chino y ruso no se mostraran correctamente.",
+                MessageType.Warning);
+            if (GUILayout.Button("Configurar Fonts Automaticamente"))
+            {
+                int result = IdiomasFontSetup.SetupFonts();
+                if (result > 0)
+                {
+                    EditorUtility.DisplayDialog("Fonts Configuradas",
+                        $"Se agregaron {result} font(s) de fallback a TMP Settings.", "OK");
+                }
+            }
+        }
+
         // === ESTADISTICAS ===
         EditorGUILayout.Space(8);
         if (_cachedLanguages != null && _cachedLanguages.Length > 0)

@@ -87,6 +87,9 @@ public static class IdiomasPrefabCreator
         _wireAttempts = 0;
         EditorApplication.update += TryWireDropdown;
 
+        // Configurar fallback fonts de TMP automaticamente
+        IdiomasFontSetup.SetupFonts();
+
         string msg = createdManager
             ? "[Idiomas] LocalizationManager + Selector creados. Cableando dropdown..."
             : "[Idiomas] Selector creado. Cableando dropdown al LocalizationManager existente...";
@@ -130,6 +133,10 @@ public static class IdiomasPrefabCreator
         TextAsset tf = FindTranslationFile();
         if (tf != null) SetField(mgr, "translationFile", tf);
         Selection.activeGameObject = go;
+
+        // Configurar fallback fonts de TMP automaticamente
+        IdiomasFontSetup.SetupFonts();
+
         Debug.Log("[Idiomas] LocalizationManager creado.");
     }
 
