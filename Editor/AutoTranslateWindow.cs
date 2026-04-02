@@ -19,11 +19,11 @@ using VRC.SDK3.Data;
 ///
 /// Flujo:
 ///   1. Se abre desde el Inspector del LocalizationManager
-///   2. Seleccionar idioma origen (el que tiene las claves completas)
-///   3. Marcar idiomas destino
-///   4. Clic "Traducir" — traduce con MyMemory y muestra progreso
-///   5. Revisar traducciones en la vista previa
-///   6. Clic "Guardar" — escribe al JSON
+///   2. Marcar idiomas destino a traducir
+///   3. Clic "Traducir" — para cada clave, detecta automaticamente
+///      el idioma fuente (el que ya tiene texto) y traduce desde ahi
+///   4. Revisar traducciones en la vista previa
+///   5. Clic "Guardar" — escribe al JSON
 /// </summary>
 public class AutoTranslateWindow : EditorWindow
 {
@@ -31,21 +31,30 @@ public class AutoTranslateWindow : EditorWindow
     // Idiomas soportados
     // =====================================================================
 
-    private static readonly string[] LANG_CODES = {
-        "en", "es", "ja", "ko", "zh-CN", "zh-TW", "ru", "pt-BR", "fr", "de", "ca"
-    };
+    // Idiomas centralizados en IdiomasLanguages.cs
+    private static string[] LANG_CODES => IdiomasLanguages.Codes;
+    private static string[] LANG_NAMES => IdiomasLanguages.NativeNames;
 
-    private static readonly string[] LANG_NAMES = {
-        "English", "Español", "日本語", "한국어", "中文 (简体)",
-        "中文 (繁體)", "Русский", "Português", "Français", "Deutsch", "Català"
-    };
-
-    // Mapeo de nuestros codigos a codigos de MyMemory API
-    private static readonly Dictionary<string, string> API_CODES = new Dictionary<string, string>()
+    // Mapeo de codigos internos a codigos de cada API
+    private static readonly Dictionary<string, string> MYMEMORY_CODES = new Dictionary<string, string>()
     {
         { "en", "en" }, { "es", "es" }, { "ja", "ja" }, { "ko", "ko" },
         { "zh-CN", "zh-CN" }, { "zh-TW", "zh-TW" }, { "ru", "ru" },
         { "pt-BR", "pt" }, { "fr", "fr" }, { "de", "de" }, { "ca", "ca" }
+    };
+
+    private static readonly Dictionary<string, string> LINGVA_CODES = new Dictionary<string, string>()
+    {
+        { "en", "en" }, { "es", "es" }, { "ja", "ja" }, { "ko", "ko" },
+        { "zh-CN", "zh" }, { "zh-TW", "zh_HANT" }, { "ru", "ru" },
+        { "pt-BR", "pt" }, { "fr", "fr" }, { "de", "de" }, { "ca", "ca" }
+    };
+
+    // Instancias de Lingva (fallback si la principal cae)
+    private static readonly string[] LINGVA_HOSTS = {
+        "lingva.ml",
+        "translate.plausibility.cloud",
+        "lingva.garudalinux.org",
     };
 
     // =====================================================================
@@ -54,10 +63,12 @@ public class AutoTranslateWindow : EditorWindow
 
     private string _jsonPath;
     private Dictionary<string, Dictionary<string, string>> _translations;
-    private int _sourceLanguageIndex;
     private bool[] _targetChecked;
     private Vector2 _scrollPos;
     private Vector2 _previewScroll;
+
+    // Todas las claves que existen en algun idioma
+    private HashSet<string> _allKeys;
 
     // Resultados de traduccion
     private Dictionary<string, Dictionary<string, string>> _newTranslations;
@@ -90,6 +101,7 @@ public class AutoTranslateWindow : EditorWindow
     {
         _targetChecked = new bool[LANG_CODES.Length];
         _newTranslations = new Dictionary<string, Dictionary<string, string>>();
+        _allKeys = new HashSet<string>();
 
         if (string.IsNullOrEmpty(_jsonPath) || !File.Exists(_jsonPath))
         {
@@ -125,55 +137,72 @@ public class AutoTranslateWindow : EditorWindow
             {
                 string key = keys[j].String;
                 if (langData.TryGetValue(key, out DataToken val))
+                {
                     dict[key] = val.String;
+                    _allKeys.Add(key);
+                }
             }
             _translations[lang] = dict;
         }
 
-        // Autodetectar idioma origen (el que tiene mas claves)
-        _sourceLanguageIndex = 0;
-        int maxKeys = 0;
+        // Marcar idiomas que tienen claves faltantes
         for (int i = 0; i < LANG_CODES.Length; i++)
         {
-            if (_translations.ContainsKey(LANG_CODES[i]) &&
-                _translations[LANG_CODES[i]].Count > maxKeys)
-            {
-                maxKeys = _translations[LANG_CODES[i]].Count;
-                _sourceLanguageIndex = i;
-            }
+            int missing = CountMissing(LANG_CODES[i]);
+            _targetChecked[i] = missing > 0;
         }
 
-        // Marcar idiomas que tienen claves faltantes
-        string srcLang = LANG_CODES[_sourceLanguageIndex];
-        if (_translations.ContainsKey(srcLang))
-        {
-            for (int i = 0; i < LANG_CODES.Length; i++)
-            {
-                if (i == _sourceLanguageIndex) continue;
-                int missing = CountMissing(srcLang, LANG_CODES[i]);
-                _targetChecked[i] = missing > 0;
-            }
-        }
-
-        _statusMessage = $"JSON cargado: {_translations.Count} idioma(s), {maxKeys} clave(s).";
+        _statusMessage = $"JSON cargado: {_translations.Count} idioma(s), {_allKeys.Count} clave(s) totales.";
     }
 
-    private int CountMissing(string sourceLang, string targetLang)
+    /// <summary>
+    /// Cuenta cuantas claves faltan en un idioma destino.
+    /// Compara contra TODAS las claves conocidas en el JSON.
+    /// </summary>
+    private int CountMissing(string targetLang)
     {
-        if (!_translations.ContainsKey(sourceLang)) return 0;
-        var srcKeys = _translations[sourceLang];
+        if (_allKeys == null || _allKeys.Count == 0) return 0;
 
         if (!_translations.ContainsKey(targetLang))
-            return srcKeys.Count;
+            return _allKeys.Count;
 
         var tgtKeys = _translations[targetLang];
         int missing = 0;
-        foreach (var key in srcKeys.Keys)
+        foreach (string key in _allKeys)
         {
             if (!tgtKeys.ContainsKey(key))
                 missing++;
         }
         return missing;
+    }
+
+    /// <summary>
+    /// Para una clave dada, busca el idioma que tiene el texto original.
+    /// Prioriza: en > es > el primero que encuentre.
+    /// Excluye el idioma destino.
+    /// Retorna null si no se encuentra en ningun idioma.
+    /// </summary>
+    private string FindSourceLanguage(string key, string excludeLang)
+    {
+        // Priorizar ingles y español como fuentes mas confiables
+        string[] priority = { "en", "es" };
+        for (int p = 0; p < priority.Length; p++)
+        {
+            if (priority[p] == excludeLang) continue;
+            if (_translations.ContainsKey(priority[p]) &&
+                _translations[priority[p]].ContainsKey(key))
+                return priority[p];
+        }
+
+        // Buscar en cualquier otro idioma
+        foreach (var langPair in _translations)
+        {
+            if (langPair.Key == excludeLang) continue;
+            if (langPair.Value.ContainsKey(key))
+                return langPair.Key;
+        }
+
+        return null;
     }
 
     // =====================================================================
@@ -195,54 +224,45 @@ public class AutoTranslateWindow : EditorWindow
         // --- Cabecera ---
         EditorGUILayout.Space(5);
         EditorGUILayout.LabelField("Auto-Traducir Idiomas", EditorStyles.boldLabel);
-        EditorGUILayout.LabelField("API: MyMemory (gratis, 5000 palabras/dia, sin registro)",
+        EditorGUILayout.LabelField("APIs: Lingva > MyMemory > SimplyTranslate (gratis, sin registro)",
             EditorStyles.miniLabel);
         EditorGUILayout.Space(5);
 
         // Archivo
         EditorGUILayout.LabelField("Archivo:", Path.GetFileName(_jsonPath));
 
-        // --- Idioma origen ---
+        // --- Resumen de claves por idioma ---
         EditorGUILayout.Space(5);
-        EditorGUILayout.LabelField("Idioma Origen", EditorStyles.boldLabel);
-        EditorGUILayout.LabelField("Desde que idioma se traducira a los demas.",
+        EditorGUILayout.LabelField("Estado del JSON", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField(
+            $"Claves totales: {_allKeys.Count} (distribuidas entre {_translations.Count} idioma(s))",
             EditorStyles.miniLabel);
-
-        string[] sourceOptions = BuildSourceOptions();
-        int newSourceIdx = EditorGUILayout.Popup("Traducir desde:", _sourceLanguageIndex, sourceOptions);
-        if (newSourceIdx != _sourceLanguageIndex)
-        {
-            _sourceLanguageIndex = newSourceIdx;
-            _hasResults = false;
-        }
-
-        string srcLang = LANG_CODES[_sourceLanguageIndex];
-        int srcKeyCount = _translations.ContainsKey(srcLang) ? _translations[srcLang].Count : 0;
-        EditorGUILayout.LabelField($"Claves en '{srcLang}': {srcKeyCount}");
+        EditorGUILayout.LabelField(
+            "Cada clave se traduce desde el idioma que ya tiene su texto original.",
+            EditorStyles.miniLabel);
 
         // --- Idiomas destino ---
         EditorGUILayout.Space(8);
-        EditorGUILayout.LabelField("Idiomas Destino", EditorStyles.boldLabel);
-        EditorGUILayout.LabelField("Marca los idiomas a los que quieres traducir.",
+        EditorGUILayout.LabelField("Idiomas a Completar", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField("Marca los idiomas a los que quieres traducir las claves faltantes.",
             EditorStyles.miniLabel);
         EditorGUILayout.Space(3);
 
         int totalMissingSelected = 0;
         for (int i = 0; i < LANG_CODES.Length; i++)
         {
-            if (i == _sourceLanguageIndex) continue;
-
-            int missing = CountMissing(srcLang, LANG_CODES[i]);
-            int existing = _translations.ContainsKey(LANG_CODES[i])
-                ? _translations[LANG_CODES[i]].Count : 0;
+            string langCode = LANG_CODES[i];
+            int existing = _translations.ContainsKey(langCode)
+                ? _translations[langCode].Count : 0;
+            int missing = CountMissing(langCode);
 
             string label;
             if (missing == 0)
-                label = $"{LANG_CODES[i]} — {LANG_NAMES[i]}  ({existing} claves, completo)";
+                label = $"{langCode} — {LANG_NAMES[i]}  ({existing} claves, completo)";
             else if (existing == 0)
-                label = $"{LANG_CODES[i]} — {LANG_NAMES[i]}  (nuevo, {missing} por traducir)";
+                label = $"{langCode} — {LANG_NAMES[i]}  (nuevo, {missing} por traducir)";
             else
-                label = $"{LANG_CODES[i]} — {LANG_NAMES[i]}  ({existing} existentes, {missing} faltan)";
+                label = $"{langCode} — {LANG_NAMES[i]}  ({existing} existentes, {missing} faltan)";
 
             EditorGUILayout.BeginHorizontal();
             _targetChecked[i] = EditorGUILayout.ToggleLeft(label, _targetChecked[i]);
@@ -283,34 +303,12 @@ public class AutoTranslateWindow : EditorWindow
         EditorGUILayout.EndScrollView();
     }
 
-    private string[] BuildSourceOptions()
-    {
-        string[] options = new string[LANG_CODES.Length];
-        for (int i = 0; i < LANG_CODES.Length; i++)
-        {
-            int count = _translations.ContainsKey(LANG_CODES[i])
-                ? _translations[LANG_CODES[i]].Count : 0;
-            options[i] = $"{LANG_CODES[i]} — {LANG_NAMES[i]} ({count} claves)";
-        }
-        return options;
-    }
-
     // =====================================================================
     // Traduccion con MyMemory API
     // =====================================================================
 
     private void RunTranslation()
     {
-        string srcLang = LANG_CODES[_sourceLanguageIndex];
-        if (!_translations.ContainsKey(srcLang))
-        {
-            _statusMessage = $"El idioma origen '{srcLang}' no tiene claves en el JSON.";
-            return;
-        }
-
-        var srcKeys = _translations[srcLang];
-        string srcApiCode = GetApiCode(srcLang);
-
         _newTranslations = new Dictionary<string, Dictionary<string, string>>();
         _totalTranslated = 0;
         _totalErrors = 0;
@@ -319,8 +317,8 @@ public class AutoTranslateWindow : EditorWindow
         int totalToTranslate = 0;
         for (int i = 0; i < LANG_CODES.Length; i++)
         {
-            if (!_targetChecked[i] || i == _sourceLanguageIndex) continue;
-            totalToTranslate += CountMissing(srcLang, LANG_CODES[i]);
+            if (!_targetChecked[i]) continue;
+            totalToTranslate += CountMissing(LANG_CODES[i]);
         }
 
         int processed = 0;
@@ -329,11 +327,10 @@ public class AutoTranslateWindow : EditorWindow
         {
             for (int i = 0; i < LANG_CODES.Length; i++)
             {
-                if (!_targetChecked[i] || i == _sourceLanguageIndex) continue;
+                if (!_targetChecked[i]) continue;
 
                 string tgtLang = LANG_CODES[i];
-                string tgtApiCode = GetApiCode(tgtLang);
-                int missing = CountMissing(srcLang, tgtLang);
+                int missing = CountMissing(tgtLang);
                 if (missing == 0) continue;
 
                 var tgtExisting = _translations.ContainsKey(tgtLang)
@@ -342,18 +339,22 @@ public class AutoTranslateWindow : EditorWindow
 
                 var newEntries = new Dictionary<string, string>();
 
-                foreach (var kvp in srcKeys)
+                foreach (string key in _allKeys)
                 {
-                    string key = kvp.Key;
-                    string sourceText = kvp.Value;
-
+                    // Ya tiene traduccion en este idioma
                     if (tgtExisting.ContainsKey(key)) continue;
+
+                    // Buscar idioma fuente para esta clave
+                    string srcLang = FindSourceLanguage(key, tgtLang);
+                    if (srcLang == null) continue; // No hay fuente
+
+                    string sourceText = _translations[srcLang][key];
 
                     processed++;
                     float progress = (float)processed / totalToTranslate;
                     bool cancel = EditorUtility.DisplayCancelableProgressBar(
                         "Traduciendo...",
-                        $"[{tgtLang}] {key}: \"{sourceText}\" ({processed}/{totalToTranslate})",
+                        $"[{srcLang}→{tgtLang}] {key}: \"{sourceText}\" ({processed}/{totalToTranslate})",
                         progress);
 
                     if (cancel)
@@ -365,7 +366,15 @@ public class AutoTranslateWindow : EditorWindow
                         return;
                     }
 
-                    string translated = TranslateText(sourceText, srcApiCode, tgtApiCode);
+                    // Si fuente y destino son el mismo idioma, copiar directamente
+                    if (srcLang == tgtLang)
+                    {
+                        newEntries[key] = sourceText;
+                        _totalTranslated++;
+                        continue;
+                    }
+
+                    string translated = TranslateText(sourceText, srcLang, tgtLang);
                     if (translated != null)
                     {
                         newEntries[key] = translated;
@@ -397,73 +406,299 @@ public class AutoTranslateWindow : EditorWindow
     }
 
     /// <summary>
-    /// Traduce un texto usando la API de MyMemory.
-    /// Retorna null si falla.
+    /// Traduce un texto usando cadena de fallback: Lingva -> MyMemory -> SimplyTranslate.
+    /// Protege bloques de rich text con contenido tecnico antes de traducir.
+    /// Retorna null solo si TODAS las APIs fallan.
     /// </summary>
     private string TranslateText(string text, string fromLang, string toLang)
     {
         if (string.IsNullOrEmpty(text)) return "";
 
+        // Proteger bloques de rich text con contenido tecnico
+        List<string> protectedBlocks = new List<string>();
+        string cleanText = ProtectRichTextBlocks(text, protectedBlocks);
+
+        // Si despues de proteger no queda nada traducible, devolver el original
+        string testClean = cleanText;
+        for (int p = 0; p < protectedBlocks.Count; p++)
+            testClean = testClean.Replace($"{{{p}}}", "");
+        if (string.IsNullOrWhiteSpace(testClean))
+            return text;
+
+        // Traducir el texto con placeholders
+        string translated = TranslateWithFallback(cleanText, fromLang, toLang);
+        if (translated == null) return null;
+
+        // Restaurar bloques protegidos
+        for (int p = 0; p < protectedBlocks.Count; p++)
+        {
+            translated = translated.Replace($"{{{p}}}", protectedBlocks[p]);
+            // Algunas APIs agregan espacio alrededor de {0}, limpiar variantes
+            translated = translated.Replace($"{{ {p} }}", protectedBlocks[p]);
+            translated = translated.Replace($"{{ {p}}}", protectedBlocks[p]);
+            translated = translated.Replace($"{{{p} }}", protectedBlocks[p]);
+        }
+
+        return translated;
+    }
+
+    /// <summary>
+    /// Cadena de fallback: Lingva -> MyMemory -> SimplyTranslate.
+    /// </summary>
+    private string TranslateWithFallback(string text, string fromLang, string toLang)
+    {
+        // 1. Lingva Translate (prueba varias instancias)
+        string lingvaFrom = GetCode(LINGVA_CODES, fromLang);
+        string lingvaTo = GetCode(LINGVA_CODES, toLang);
+        for (int h = 0; h < LINGVA_HOSTS.Length; h++)
+        {
+            string result = TryLingva(LINGVA_HOSTS[h], text, lingvaFrom, lingvaTo);
+            if (result != null) return result;
+        }
+
+        // 2. MyMemory
+        string mmFrom = GetCode(MYMEMORY_CODES, fromLang);
+        string mmTo = GetCode(MYMEMORY_CODES, toLang);
+        string mmResult = TryMyMemory(text, mmFrom, mmTo);
+        if (mmResult != null) return mmResult;
+
+        // 3. SimplyTranslate
+        string stResult = TrySimplyTranslate(text, fromLang, toLang);
+        if (stResult != null) return stResult;
+
+        Debug.LogWarning($"[AutoTranslate] Todas las APIs fallaron para '{text}' ({fromLang}→{toLang})");
+        return null;
+    }
+
+    // =====================================================================
+    // Proteccion de rich text
+    // =====================================================================
+
+    // Regex para bloques completos: <tag ...>contenido</tag>
+    private static readonly Regex RICH_TEXT_BLOCK = new Regex(
+        @"<(\w+)(?:[^>]*)>([^<]*)</\1>",
+        RegexOptions.Compiled);
+
+    // Regex para tags sueltos sin cierre: <sprite ...>, <br>, etc.
+    private static readonly Regex RICH_TEXT_SELF = new Regex(
+        @"<(?:sprite|br|page|nbsp|zwsp|indent|line-[a-z]+|margin[^>]*|pos[^>]*|voffset[^>]*|cspace[^>]*|mspace[^>]*|noparse|/noparse)[^>]*/?>",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// Detecta bloques de rich text con contenido tecnico (CamelCase, sin espacios,
+    /// nombres de codigo) y los reemplaza con placeholders {0}, {1}, etc.
+    /// Bloques con texto normal (con espacios, tipo "Cerrar ventana") NO se protegen
+    /// para que si se traduzcan.
+    /// </summary>
+    private string ProtectRichTextBlocks(string text, List<string> blocks)
+    {
+        // Primero proteger tags sueltos (sprite, br, etc.)
+        text = RICH_TEXT_SELF.Replace(text, m =>
+        {
+            int idx = blocks.Count;
+            blocks.Add(m.Value);
+            return $"{{{idx}}}";
+        });
+
+        // Luego proteger bloques completos con contenido tecnico
+        text = RICH_TEXT_BLOCK.Replace(text, m =>
+        {
+            string content = m.Groups[2].Value;
+
+            // Decidir si el contenido es tecnico (proteger) o texto normal (traducir)
+            if (IsTechnicalContent(content))
+            {
+                // Proteger el bloque completo (tag + contenido)
+                int idx = blocks.Count;
+                blocks.Add(m.Value);
+                return $"{{{idx}}}";
+            }
+
+            // Texto normal dentro de tags: dejar el contenido para traducir,
+            // pero proteger las tags envolventes
+            string openTag = m.Value.Substring(0, m.Value.IndexOf('>') + 1);
+            string closeTag = $"</{m.Groups[1].Value}>";
+
+            int openIdx = blocks.Count;
+            blocks.Add(openTag);
+            int closeIdx = blocks.Count;
+            blocks.Add(closeTag);
+
+            return $"{{{openIdx}}}{content}{{{closeIdx}}}";
+        });
+
+        return text;
+    }
+
+    /// <summary>
+    /// Determina si un texto parece contenido tecnico que no debe traducirse:
+    /// - CamelCase (OnPlayerCollisionEnter)
+    /// - snake_case (on_player_enter)
+    /// - Contiene puntos (System.String)
+    /// - Sin espacios y con mayusculas mezcladas
+    /// - Solo simbolos/numeros
+    /// </summary>
+    private static bool IsTechnicalContent(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content)) return true;
+
+        string trimmed = content.Trim();
+
+        // Sin espacios = probable nombre tecnico
+        if (!trimmed.Contains(" "))
+        {
+            // CamelCase: tiene al menos una minuscula seguida de mayuscula
+            if (Regex.IsMatch(trimmed, @"[a-z][A-Z]")) return true;
+
+            // snake_case
+            if (trimmed.Contains("_")) return true;
+
+            // Contiene puntos (namespace.Class)
+            if (trimmed.Contains(".")) return true;
+
+            // Solo mayusculas (acronimo tipo "API", "SDK", "URL")
+            if (Regex.IsMatch(trimmed, @"^[A-Z0-9]+$")) return true;
+        }
+
+        // Solo numeros/simbolos sin letras
+        bool hasLetter = false;
+        for (int i = 0; i < trimmed.Length; i++)
+        {
+            if (char.IsLetter(trimmed[i])) { hasLetter = true; break; }
+        }
+        if (!hasLetter) return true;
+
+        return false;
+    }
+
+    // =====================================================================
+    // API 1: Lingva Translate
+    // =====================================================================
+
+    private string TryLingva(string host, string text, string fromLang, string toLang)
+    {
+        try
+        {
+            string encoded = Uri.EscapeDataString(text);
+            string url = $"https://{host}/api/v1/{fromLang}/{toLang}/{encoded}";
+
+            string json = HttpGet(url);
+            if (json == null) return null;
+
+            // Respuesta: {"translation":"texto traducido"}
+            Match match = Regex.Match(json, "\"translation\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
+            if (match.Success)
+                return DecodeJsonString(match.Groups[1].Value);
+        }
+        catch (Exception e)
+        {
+            Debug.Log($"[AutoTranslate] Lingva ({host}) fallo: {e.Message}");
+        }
+        return null;
+    }
+
+    // =====================================================================
+    // API 2: MyMemory
+    // =====================================================================
+
+    private string TryMyMemory(string text, string fromLang, string toLang)
+    {
         try
         {
             string encoded = Uri.EscapeDataString(text);
             string url = $"https://api.mymemory.translated.net/get?q={encoded}&langpair={fromLang}|{toLang}";
 
-            HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
-            request.Method = "GET";
-            request.Timeout = 10000; // 10 segundos
-            request.UserAgent = "UnityEditor-Idiomas/1.0";
+            string json = HttpGet(url);
+            if (json == null) return null;
 
-            using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
-            using (StreamReader reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
-            {
-                string json = reader.ReadToEnd();
-                return ExtractTranslation(json);
-            }
+            // Respuesta: {"responseData":{"translatedText":"texto"},...}
+            Match match = Regex.Match(json, "\"translatedText\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
+            if (match.Success)
+                return DecodeJsonString(match.Groups[1].Value);
         }
         catch (Exception e)
         {
-            Debug.LogWarning($"[AutoTranslate] Error traduciendo '{text}' ({fromLang}→{toLang}): {e.Message}");
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Extrae "translatedText" de la respuesta JSON de MyMemory.
-    /// Formato: {"responseData":{"translatedText":"texto traducido"},...}
-    /// </summary>
-    private string ExtractTranslation(string json)
-    {
-        // Buscar "translatedText":"..."
-        Match match = Regex.Match(json, "\"translatedText\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
-        if (match.Success)
-        {
-            string result = match.Groups[1].Value;
-
-            // Decodificar secuencias de escape JSON en orden correcto
-            // 1. Primero decodificar \uXXXX (unicode escapes)
-            result = Regex.Replace(result, @"\\u([0-9a-fA-F]{4})", m =>
-            {
-                int code = int.Parse(m.Groups[1].Value, System.Globalization.NumberStyles.HexNumber);
-                return ((char)code).ToString();
-            });
-
-            // 2. Luego las secuencias simples
-            result = result.Replace("\\\"", "\"");
-            result = result.Replace("\\n", "\n");
-            result = result.Replace("\\t", "\t");
-            result = result.Replace("\\/", "/");
-            result = result.Replace("\\\\", "\\");
-
-            return result;
+            Debug.Log($"[AutoTranslate] MyMemory fallo: {e.Message}");
         }
         return null;
     }
 
-    private string GetApiCode(string langCode)
+    // =====================================================================
+    // API 3: SimplyTranslate
+    // =====================================================================
+
+    private string TrySimplyTranslate(string text, string fromLang, string toLang)
     {
-        if (API_CODES.ContainsKey(langCode))
-            return API_CODES[langCode];
+        try
+        {
+            string encoded = Uri.EscapeDataString(text);
+            string url = $"https://simplytranslate.org/api/translate/" +
+                         $"?engine=google&from={fromLang}&to={toLang}&text={encoded}";
+
+            string json = HttpGet(url);
+            if (json == null) return null;
+
+            // Respuesta: {"translated_text":"texto",...}
+            Match match = Regex.Match(json, "\"translated_text\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
+            if (match.Success)
+                return DecodeJsonString(match.Groups[1].Value);
+        }
+        catch (Exception e)
+        {
+            Debug.Log($"[AutoTranslate] SimplyTranslate fallo: {e.Message}");
+        }
+        return null;
+    }
+
+    // =====================================================================
+    // HTTP y utilidades
+    // =====================================================================
+
+    /// <summary>
+    /// Realiza un HTTP GET y devuelve el cuerpo de la respuesta. Null si falla.
+    /// </summary>
+    private string HttpGet(string url)
+    {
+        HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
+        request.Method = "GET";
+        request.Timeout = 10000;
+        request.UserAgent = "UnityEditor-Idiomas/1.0";
+
+        using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
+        using (StreamReader reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
+        {
+            return reader.ReadToEnd();
+        }
+    }
+
+    /// <summary>
+    /// Decodifica secuencias de escape JSON (\uXXXX, \n, \t, etc.)
+    /// </summary>
+    private static string DecodeJsonString(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return s;
+
+        // 1. Unicode escapes \uXXXX
+        s = Regex.Replace(s, @"\\u([0-9a-fA-F]{4})", m =>
+        {
+            int code = int.Parse(m.Groups[1].Value, System.Globalization.NumberStyles.HexNumber);
+            return ((char)code).ToString();
+        });
+
+        // 2. Secuencias simples
+        s = s.Replace("\\\"", "\"");
+        s = s.Replace("\\n", "\n");
+        s = s.Replace("\\t", "\t");
+        s = s.Replace("\\/", "/");
+        s = s.Replace("\\\\", "\\");
+
+        return s;
+    }
+
+    private static string GetCode(Dictionary<string, string> map, string langCode)
+    {
+        if (map.ContainsKey(langCode))
+            return map[langCode];
         return langCode;
     }
 
@@ -486,12 +721,7 @@ public class AutoTranslateWindow : EditorWindow
             string lang = langPair.Key;
             var entries = langPair.Value;
 
-            // Nombre del idioma
-            string langName = lang;
-            for (int i = 0; i < LANG_CODES.Length; i++)
-            {
-                if (LANG_CODES[i] == lang) { langName = LANG_NAMES[i]; break; }
-            }
+            string langName = IdiomasLanguages.GetNativeName(lang);
 
             EditorGUILayout.Space(3);
             EditorGUILayout.LabelField($"{lang} — {langName} ({entries.Count} traducciones)",

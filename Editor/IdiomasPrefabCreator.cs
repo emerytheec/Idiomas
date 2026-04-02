@@ -37,21 +37,22 @@ public static class IdiomasPrefabCreator
     private static readonly Color COL_TOG_ON   = new Color(0.2f, 0.65f, 0.45f, 1f);
     private static readonly Color COL_TOG_OFF  = new Color(0.45f, 0.2f, 0.2f, 1f);
 
-    // Idiomas (solo Latin)
-    private static readonly string[,] LANGS = {
-        { "",      "Auto (Detect)" },
-        { "en",    "English" },
-        { "es",    "Espanol" },
-        { "ja",    "Japanese" },
-        { "ko",    "Korean" },
-        { "zh-CN", "Chinese Simplified" },
-        { "zh-TW", "Chinese Traditional" },
-        { "ru",    "Russian" },
-        { "pt-BR", "Portuguese" },
-        { "fr",    "French" },
-        { "de",    "German" },
-        { "ca",    "Catalan" },
-    };
+    // Idiomas centralizados en IdiomasLanguages.cs + entrada "Auto" para dropdown
+    private static readonly string[,] LANGS = BuildLangsArray();
+
+    private static string[,] BuildLangsArray()
+    {
+        int count = IdiomasLanguages.Codes.Length;
+        string[,] result = new string[count + 1, 2];
+        result[0, 0] = "";
+        result[0, 1] = "Auto (Detect)";
+        for (int i = 0; i < count; i++)
+        {
+            result[i + 1, 0] = IdiomasLanguages.Codes[i];
+            result[i + 1, 1] = IdiomasLanguages.LatinNames[i];
+        }
+        return result;
+    }
 
     // =====================================================================
     // Menu: Crear Selector de Idioma

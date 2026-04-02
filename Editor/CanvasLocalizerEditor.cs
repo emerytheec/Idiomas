@@ -48,7 +48,7 @@ public class CanvasLocalizerEditor : Editor
     private List<ScanEntry> _scanResults;
     private bool _hasScanResults;
     private Vector2 _scrollPos;
-    private bool _showAdvanced;
+    private string _searchFilter = "";
 
     /// <summary>
     /// Resultado de escaneo para un solo componente de texto.
@@ -98,6 +98,9 @@ public class CanvasLocalizerEditor : Editor
 
     public override void OnInspectorGUI()
     {
+        // Header estandar de UdonSharp (boton convert, program asset, sync, etc.)
+        if (UdonSharpGUI.DrawDefaultUdonSharpBehaviourHeader(target)) return;
+
         serializedObject.Update();
 
         // --- Titulo ---
@@ -175,21 +178,6 @@ public class CanvasLocalizerEditor : Editor
                 MessageType.Info);
         }
 
-        // === DATOS AVANZADOS ===
-        EditorGUILayout.Space(5);
-        _showAdvanced = EditorGUILayout.Foldout(_showAdvanced,
-            "Datos Avanzados (auto-llenado por el escaneo)", true);
-        if (_showAdvanced)
-        {
-            EditorGUI.indentLevel++;
-            GUI.enabled = false; // Solo lectura
-            EditorGUILayout.PropertyField(_tmpTexts, new GUIContent("TMP Textos"), true);
-            EditorGUILayout.PropertyField(_tmpKeys, new GUIContent("TMP Claves"), true);
-            EditorGUILayout.PropertyField(_legacyTexts, new GUIContent("Legacy Textos"), true);
-            EditorGUILayout.PropertyField(_legacyKeys, new GUIContent("Legacy Claves"), true);
-            GUI.enabled = true;
-            EditorGUI.indentLevel--;
-        }
 
         serializedObject.ApplyModifiedProperties();
     }
@@ -198,23 +186,9 @@ public class CanvasLocalizerEditor : Editor
     // Dropdown de idioma base
     // =====================================================================
 
-    private static readonly string[] BASE_LANG_CODES = {
-        "en", "es", "ja", "ko", "zh-CN", "zh-TW", "ru", "pt-BR", "fr", "de", "ca"
-    };
-
-    private static readonly string[] BASE_LANG_LABELS = {
-        "en — English",
-        "es — Espanol",
-        "ja — Japanese",
-        "ko — Korean",
-        "zh-CN — Chinese Simplified",
-        "zh-TW — Chinese Traditional",
-        "ru — Russian",
-        "pt-BR — Portuguese",
-        "fr — French",
-        "de — German",
-        "ca — Catalan"
-    };
+    // Idiomas centralizados en IdiomasLanguages.cs
+    private static string[] BASE_LANG_CODES => IdiomasLanguages.Codes;
+    private static string[] BASE_LANG_LABELS => IdiomasLanguages.PopupLabelsLatin;
 
     private void DrawBaseLanguageDropdown()
     {
@@ -346,6 +320,7 @@ public class CanvasLocalizerEditor : Editor
 
             usedKeys.Add(key);
 
+            bool wasConfigured = existingKeys.ContainsKey(tmp);
             _scanResults.Add(new ScanEntry
             {
                 component = tmp,
@@ -353,7 +328,8 @@ public class CanvasLocalizerEditor : Editor
                 generatedKey = key,
                 currentText = text,
                 objectPath = GetRelativePath(root, tmp.transform),
-                excluded = excludedSet.Contains(tmp.gameObject),
+                excluded = excludedSet.Contains(tmp.gameObject) ||
+                           (!wasConfigured && IsNonTranslatable(text)),
                 existsInJson = false,
             });
         }
@@ -378,6 +354,7 @@ public class CanvasLocalizerEditor : Editor
 
             usedKeys.Add(key);
 
+            bool wasConfiguredLegacy = existingKeys.ContainsKey(txt);
             _scanResults.Add(new ScanEntry
             {
                 component = txt,
@@ -385,7 +362,8 @@ public class CanvasLocalizerEditor : Editor
                 generatedKey = key,
                 currentText = text,
                 objectPath = GetRelativePath(root, txt.transform),
-                excluded = excludedSet.Contains(txt.gameObject),
+                excluded = excludedSet.Contains(txt.gameObject) ||
+                           (!wasConfiguredLegacy && IsNonTranslatable(text)),
                 existsInJson = false,
             });
         }
@@ -525,9 +503,48 @@ public class CanvasLocalizerEditor : Editor
         DrawColorLegend(new Color(0.3f, 0.7f, 0.3f, 0.3f), "En JSON");
         DrawColorLegend(new Color(1f, 0.85f, 0.2f, 0.3f), "Nuevo");
         DrawColorLegend(new Color(0.5f, 0.5f, 0.5f, 0.3f), "Excluido");
+        DrawColorLegend(new Color(1f, 0.2f, 0.2f, 0.3f), "Duplicada");
         EditorGUILayout.EndHorizontal();
 
         EditorGUILayout.Space(3);
+
+        // --- Construir set de claves para detectar duplicados (mejora 4) ---
+        HashSet<string> duplicateCheck = new HashSet<string>();
+        HashSet<string> duplicateKeys = new HashSet<string>();
+        for (int i = 0; i < _scanResults.Count; i++)
+        {
+            if (_scanResults[i].excluded) continue;
+            string k = _scanResults[i].generatedKey;
+            if (!string.IsNullOrEmpty(k))
+            {
+                if (!duplicateCheck.Add(k))
+                    duplicateKeys.Add(k);
+            }
+        }
+
+        if (duplicateKeys.Count > 0)
+        {
+            EditorGUILayout.HelpBox(
+                $"Hay {duplicateKeys.Count} clave(s) duplicada(s). Corrigelas antes de exportar.",
+                MessageType.Error);
+        }
+
+        // --- Filtro de busqueda (mejora 6) ---
+        EditorGUILayout.BeginHorizontal();
+        EditorGUILayout.LabelField("Filtrar:", GUILayout.Width(42));
+        _searchFilter = EditorGUILayout.TextField(_searchFilter);
+        if (!string.IsNullOrEmpty(_searchFilter))
+        {
+            if (GUILayout.Button("X", EditorStyles.miniButton, GUILayout.Width(20)))
+                _searchFilter = "";
+        }
+        EditorGUILayout.EndHorizontal();
+
+        string filterLower = string.IsNullOrEmpty(_searchFilter)
+            ? null
+            : _searchFilter.ToLower();
+
+        EditorGUILayout.Space(2);
 
         // --- Cabecera de tabla ---
         EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
@@ -535,16 +552,43 @@ public class CanvasLocalizerEditor : Editor
         GUILayout.Label("Clave de Traduccion", EditorStyles.miniLabel, GUILayout.Width(220));
         GUILayout.Label("Texto Actual", EditorStyles.miniLabel, GUILayout.MinWidth(140));
         GUILayout.Label("Ruta", EditorStyles.miniLabel, GUILayout.Width(160));
-        GUILayout.Label("Tipo", EditorStyles.miniLabel, GUILayout.Width(36));
-        GUILayout.Label("JSON", EditorStyles.miniLabel, GUILayout.Width(36));
+        GUILayout.Label("", GUILayout.Width(20)); // Columna ping
         EditorGUILayout.EndHorizontal();
 
-        // --- Lista scrollable ---
-        _scrollPos = EditorGUILayout.BeginScrollView(_scrollPos, GUILayout.MaxHeight(380));
+        // --- Lista scrollable (altura dinamica, max 380px) ---
+        int visibleCount = 0;
+        if (filterLower == null)
+        {
+            visibleCount = _scanResults.Count;
+        }
+        else
+        {
+            for (int v = 0; v < _scanResults.Count; v++)
+            {
+                ScanEntry ve = _scanResults[v];
+                if (ve.generatedKey.ToLower().Contains(filterLower) ||
+                    ve.currentText.ToLower().Contains(filterLower) ||
+                    ve.objectPath.ToLower().Contains(filterLower))
+                    visibleCount++;
+            }
+        }
+        float rowHeight = 24f;
+        float scrollHeight = Mathf.Min(visibleCount * rowHeight + 4f, 380f);
+        if (scrollHeight < rowHeight) scrollHeight = rowHeight;
+        _scrollPos = EditorGUILayout.BeginScrollView(_scrollPos, GUILayout.Height(scrollHeight));
 
         for (int i = 0; i < _scanResults.Count; i++)
         {
             ScanEntry entry = _scanResults[i];
+
+            // Filtrar por busqueda (mejora 6)
+            if (filterLower != null)
+            {
+                bool match = entry.generatedKey.ToLower().Contains(filterLower) ||
+                             entry.currentText.ToLower().Contains(filterLower) ||
+                             entry.objectPath.ToLower().Contains(filterLower);
+                if (!match) continue;
+            }
 
             // Color de fondo segun estado
             Color bgColor;
@@ -554,6 +598,13 @@ public class CanvasLocalizerEditor : Editor
                 bgColor = new Color(0.3f, 0.7f, 0.3f, 0.15f);
             else
                 bgColor = new Color(1f, 0.85f, 0.2f, 0.15f);
+
+            // Claves duplicadas en rojo (mejora 4)
+            bool isDuplicate = !entry.excluded &&
+                !string.IsNullOrEmpty(entry.generatedKey) &&
+                duplicateKeys.Contains(entry.generatedKey);
+            if (isDuplicate)
+                bgColor = new Color(1f, 0.2f, 0.2f, 0.3f);
 
             GUI.backgroundColor = bgColor;
             EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
@@ -577,29 +628,39 @@ public class CanvasLocalizerEditor : Editor
                 _scanResults[i] = entry;
             }
 
-            // Texto actual (solo lectura, truncado si es largo)
-            string displayText = entry.currentText;
+            // Texto actual (solo lectura, truncado con tooltip completo - mejora 3)
+            string fullText = entry.currentText.Replace("\n", " ").Replace("\r", "");
+            string displayText = fullText;
             if (displayText.Length > 45)
                 displayText = displayText.Substring(0, 42) + "...";
-            displayText = displayText.Replace("\n", " ").Replace("\r", "");
-            EditorGUILayout.LabelField(displayText, GUILayout.MinWidth(140));
+            EditorGUILayout.LabelField(
+                new GUIContent(displayText, fullText),
+                GUILayout.MinWidth(140));
 
-            // Ruta en la jerarquia
+            // Ruta en la jerarquia (con tooltip completo - mejora 3)
             string displayPath = entry.objectPath;
+            string fullPath = entry.objectPath;
             if (displayPath.Length > 28)
                 displayPath = "..." + displayPath.Substring(displayPath.Length - 25);
-            EditorGUILayout.LabelField(displayPath,
+            EditorGUILayout.LabelField(
+                new GUIContent(displayPath, fullPath),
                 EditorStyles.miniLabel, GUILayout.Width(160));
 
-            // Tipo
-            EditorGUILayout.LabelField(
-                entry.isTMP ? "TMP" : "Text",
-                EditorStyles.miniLabel, GUILayout.Width(36));
-
-            // Estado JSON
-            string jsonLabel = entry.existsInJson ? "\u2713" : "NEW";
-            EditorGUILayout.LabelField(jsonLabel,
-                EditorStyles.miniLabel, GUILayout.Width(36));
+            // Boton ping para seleccionar el GameObject en la jerarquia (mejora 2)
+            if (entry.component != null)
+            {
+                if (GUILayout.Button(
+                    new GUIContent("\u25CE", "Seleccionar en la jerarquia"),
+                    EditorStyles.miniButton, GUILayout.Width(20)))
+                {
+                    EditorGUIUtility.PingObject(entry.component.gameObject);
+                    Selection.activeGameObject = entry.component.gameObject;
+                }
+            }
+            else
+            {
+                GUILayout.Space(20);
+            }
 
             EditorGUILayout.EndHorizontal();
         }
@@ -608,8 +669,8 @@ public class CanvasLocalizerEditor : Editor
 
         EditorGUILayout.Space(5);
 
-        // --- Botones de accion ---
-        EditorGUILayout.BeginHorizontal();
+        // --- Boton de accion ---
+        EditorGUI.BeginDisabledGroup(duplicateKeys.Count > 0);
 
         GUI.backgroundColor = new Color(0.2f, 0.8f, 0.3f);
         if (GUILayout.Button("Exportar al JSON y Aplicar", GUILayout.Height(30)))
@@ -618,28 +679,14 @@ public class CanvasLocalizerEditor : Editor
         }
         GUI.backgroundColor = Color.white;
 
-        if (GUILayout.Button("Solo Aplicar\n(sin tocar JSON)", GUILayout.Height(30)))
-        {
-            ApplyToArrays();
-        }
-
-        EditorGUILayout.EndHorizontal();
-
-        EditorGUILayout.Space(3);
-
-        // Boton limpiar escaneo
-        if (GUILayout.Button("Cerrar Resultados del Escaneo"))
-        {
-            _scanResults = null;
-            _hasScanResults = false;
-        }
+        EditorGUI.EndDisabledGroup();
     }
 
     private void DrawColorLegend(Color color, string label)
     {
         Rect rect = GUILayoutUtility.GetRect(12, 12, GUILayout.Width(12));
         EditorGUI.DrawRect(rect, color);
-        GUILayout.Label(label, EditorStyles.miniLabel, GUILayout.Width(55));
+        GUILayout.Label(label, EditorStyles.miniLabel, GUILayout.Width(60));
     }
 
     // =====================================================================
@@ -1037,6 +1084,26 @@ public class CanvasLocalizerEditor : Editor
             current = current.parent;
         }
         return string.Join("/", parts);
+    }
+
+    /// <summary>
+    /// Detecta si un texto no deberia traducirse (numeros, signos, placeholders).
+    /// Devuelve true si el texto parece no-traducible.
+    /// </summary>
+    private static bool IsNonTranslatable(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return true;
+
+        string trimmed = text.Trim();
+        if (trimmed.Length == 0) return true;
+
+        // Verificar si todos los caracteres son no-letra (numeros, signos, puntuacion, espacios)
+        for (int i = 0; i < trimmed.Length; i++)
+        {
+            if (char.IsLetter(trimmed[i])) return false;
+        }
+
+        return true;
     }
 
     // =====================================================================

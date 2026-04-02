@@ -48,7 +48,7 @@ public class CanvasLocalizer : UdonSharpBehaviour
     [Tooltip("Idioma en el que estan escritos los textos originales del canvas.\n" +
              "Se usa al exportar al JSON para saber bajo que idioma guardar el texto.\n" +
              "Ejemplos: 'es', 'en', 'ja'.")]
-    [SerializeField] private string baseLanguage = "es";
+    [SerializeField] private string baseLanguage = "en";
 
     // =====================================================================
     // Arrays de textos (llenados automaticamente por el Editor)
