@@ -47,7 +47,6 @@ public class CanvasLocalizerEditor : Editor
 
     private List<ScanEntry> _scanResults;
     private bool _hasScanResults;
-    private Vector2 _scrollPos;
     private string _searchFilter = "";
 
     /// <summary>
@@ -92,8 +91,184 @@ public class CanvasLocalizerEditor : Editor
         _legacyTexts = serializedObject.FindProperty("legacyTexts");
         _legacyKeys = serializedObject.FindProperty("legacyKeys");
         _excludedObjects = serializedObject.FindProperty("_excludedObjects");
-        _scanResults = null;
-        _hasScanResults = false;
+
+        // Auto-generar ID del canvas si esta vacio
+        AutoGenerateCanvasId();
+
+        // Reconstruir resultados de escaneo desde los arrays serializados
+        RebuildScanResultsFromArrays();
+    }
+
+    /// <summary>
+    /// Auto-genera un ID unico para el canvas basado en el nombre del GameObject.
+    /// Solo actua si el campo canvasId esta vacio.
+    /// Revisa todos los CanvasLocalizer de la escena para evitar colisiones.
+    /// </summary>
+    private void AutoGenerateCanvasId()
+    {
+        if (!string.IsNullOrEmpty(_canvasId.stringValue)) return;
+
+        CanvasLocalizer cl = target as CanvasLocalizer;
+        if (cl == null) return;
+
+        // Generar ID base desde el nombre del GameObject
+        string baseName = NormalizeName(cl.gameObject.name);
+        if (string.IsNullOrEmpty(baseName)) baseName = "canvas";
+
+        // Recopilar IDs existentes de otros CanvasLocalizer en la escena
+        HashSet<string> usedIds = new HashSet<string>();
+        CanvasLocalizer[] allLocalizers = Object.FindObjectsOfType<CanvasLocalizer>(true);
+        for (int i = 0; i < allLocalizers.Length; i++)
+        {
+            if (allLocalizers[i] == cl) continue;
+            string otherId = allLocalizers[i].GetCanvasId();
+            if (!string.IsNullOrEmpty(otherId))
+                usedIds.Add(otherId);
+        }
+
+        // Asegurar unicidad
+        string finalId = baseName;
+        int counter = 2;
+        while (usedIds.Contains(finalId))
+        {
+            finalId = baseName + "_" + counter;
+            counter++;
+        }
+
+        _canvasId.stringValue = finalId;
+        serializedObject.ApplyModifiedProperties();
+    }
+
+    /// <summary>
+    /// Reconstruye _scanResults a partir de los arrays ya serializados (tmpTexts/Keys, legacyTexts/Keys)
+    /// y la lista de exclusiones. Asi al volver al inspector no se pierden los datos.
+    /// </summary>
+    private void RebuildScanResultsFromArrays()
+    {
+        int tmpCount = _tmpTexts.arraySize;
+        int legacyCount = _legacyTexts.arraySize;
+        int excludedCount = _excludedObjects.arraySize;
+
+        if (tmpCount == 0 && legacyCount == 0 && excludedCount == 0)
+        {
+            _scanResults = null;
+            _hasScanResults = false;
+            return;
+        }
+
+        _scanResults = new List<ScanEntry>();
+        CanvasLocalizer cl = (CanvasLocalizer)target;
+        Transform root = cl.transform;
+
+        // Cargar exclusiones
+        HashSet<GameObject> excludedSet = new HashSet<GameObject>();
+        for (int i = 0; i < excludedCount; i++)
+        {
+            Object obj = _excludedObjects.GetArrayElementAtIndex(i).objectReferenceValue;
+            if (obj != null) excludedSet.Add(obj as GameObject);
+        }
+
+        // Reconstruir entradas TMP
+        int tmpKeyCount = _tmpKeys.arraySize;
+        for (int i = 0; i < tmpCount && i < tmpKeyCount; i++)
+        {
+            TextMeshProUGUI comp = _tmpTexts.GetArrayElementAtIndex(i).objectReferenceValue as TextMeshProUGUI;
+            string key = _tmpKeys.GetArrayElementAtIndex(i).stringValue;
+            if (comp == null) continue;
+
+            _scanResults.Add(new ScanEntry
+            {
+                component = comp,
+                isTMP = true,
+                generatedKey = key,
+                currentText = comp.text ?? "",
+                objectPath = GetRelativePath(root, comp.transform),
+                excluded = false,
+                existsInJson = false,
+            });
+        }
+
+        // Reconstruir entradas Legacy
+        int legacyKeyCount = _legacyKeys.arraySize;
+        for (int i = 0; i < legacyCount && i < legacyKeyCount; i++)
+        {
+            Text comp = _legacyTexts.GetArrayElementAtIndex(i).objectReferenceValue as Text;
+            string key = _legacyKeys.GetArrayElementAtIndex(i).stringValue;
+            if (comp == null) continue;
+
+            _scanResults.Add(new ScanEntry
+            {
+                component = comp,
+                isTMP = false,
+                generatedKey = key,
+                currentText = comp.text ?? "",
+                objectPath = GetRelativePath(root, comp.transform),
+                excluded = false,
+                existsInJson = false,
+            });
+        }
+
+        // Reconstruir entradas excluidas (obtener texto actual de cada componente)
+        for (int i = 0; i < excludedCount; i++)
+        {
+            GameObject go = _excludedObjects.GetArrayElementAtIndex(i).objectReferenceValue as GameObject;
+            if (go == null) continue;
+
+            TextMeshProUGUI tmp = go.GetComponent<TextMeshProUGUI>();
+            if (tmp != null)
+            {
+                _scanResults.Add(new ScanEntry
+                {
+                    component = tmp,
+                    isTMP = true,
+                    generatedKey = "",
+                    currentText = tmp.text ?? "",
+                    objectPath = GetRelativePath(root, tmp.transform),
+                    excluded = true,
+                    existsInJson = false,
+                });
+                continue;
+            }
+
+            Text legacy = go.GetComponent<Text>();
+            if (legacy != null)
+            {
+                _scanResults.Add(new ScanEntry
+                {
+                    component = legacy,
+                    isTMP = false,
+                    generatedKey = "",
+                    currentText = legacy.text ?? "",
+                    objectPath = GetRelativePath(root, legacy.transform),
+                    excluded = true,
+                    existsInJson = false,
+                });
+            }
+        }
+
+        // Marcar cuales ya existen en JSON
+        MarkExistingKeysInJson();
+
+        _hasScanResults = _scanResults.Count > 0;
+    }
+
+    /// <summary>
+    /// Busca si otro CanvasLocalizer en la escena tiene el mismo canvasId.
+    /// Devuelve el nombre del GameObject duplicado, o null si no hay conflicto.
+    /// </summary>
+    private string FindDuplicateCanvasId(string id)
+    {
+        CanvasLocalizer cl = target as CanvasLocalizer;
+        if (cl == null) return null;
+
+        CanvasLocalizer[] allLocalizers = Object.FindObjectsOfType<CanvasLocalizer>(true);
+        for (int i = 0; i < allLocalizers.Length; i++)
+        {
+            if (allLocalizers[i] == cl) continue;
+            if (allLocalizers[i].GetCanvasId() == id)
+                return allLocalizers[i].gameObject.name;
+        }
+        return null;
     }
 
     public override void OnInspectorGUI()
@@ -129,6 +304,18 @@ public class CanvasLocalizerEditor : Editor
                 "Configura un 'ID del Canvas' antes de escanear.\n" +
                 "Ejemplo: 'settings', 'main_menu', 'hud'.",
                 MessageType.Warning);
+        }
+        else
+        {
+            // Verificar si otro CanvasLocalizer ya usa el mismo ID
+            string duplicateOwner = FindDuplicateCanvasId(canvasId);
+            if (duplicateOwner != null)
+            {
+                EditorGUILayout.HelpBox(
+                    $"El ID '{canvasId}' ya esta en uso por '{duplicateOwner}'.\n" +
+                    "Usa un ID unico para evitar sobreescribir traducciones.",
+                    MessageType.Error);
+            }
         }
 
         EditorGUILayout.Space(8);
@@ -194,7 +381,6 @@ public class CanvasLocalizerEditor : Editor
     {
         string current = _baseLanguage.stringValue;
 
-        // Buscar indice actual en la lista
         int selectedIndex = -1;
         for (int i = 0; i < BASE_LANG_CODES.Length; i++)
         {
@@ -205,59 +391,14 @@ public class CanvasLocalizerEditor : Editor
             }
         }
 
-        if (selectedIndex >= 0)
+        int newIndex = EditorGUILayout.Popup(
+            new GUIContent("Idioma Base",
+                "Idioma en que estan escritos los textos actuales del canvas."),
+            selectedIndex, BASE_LANG_LABELS);
+
+        if (newIndex >= 0 && newIndex != selectedIndex)
         {
-            // El idioma actual esta en la lista: mostrar dropdown normal
-            int newIndex = EditorGUILayout.Popup(
-                new GUIContent("Idioma Base",
-                    "Idioma en que estan escritos los textos actuales del canvas."),
-                selectedIndex, BASE_LANG_LABELS);
-
-            if (newIndex != selectedIndex)
-            {
-                _baseLanguage.stringValue = BASE_LANG_CODES[newIndex];
-            }
-        }
-        else
-        {
-            // El idioma actual no esta en la lista (valor personalizado o vacio)
-            // Mostrar dropdown + campo de texto para no perder el valor
-            EditorGUILayout.BeginHorizontal();
-
-            // Construir opciones con el valor actual como primera opcion
-            string[] labels;
-            string[] codes;
-            if (!string.IsNullOrEmpty(current))
-            {
-                labels = new string[BASE_LANG_LABELS.Length + 1];
-                codes = new string[BASE_LANG_CODES.Length + 1];
-                labels[0] = current + " (personalizado)";
-                codes[0] = current;
-                for (int i = 0; i < BASE_LANG_LABELS.Length; i++)
-                {
-                    labels[i + 1] = BASE_LANG_LABELS[i];
-                    codes[i + 1] = BASE_LANG_CODES[i];
-                }
-                int newIndex = EditorGUILayout.Popup(
-                    new GUIContent("Idioma Base"), 0, labels);
-                if (newIndex != 0)
-                {
-                    _baseLanguage.stringValue = codes[newIndex];
-                }
-            }
-            else
-            {
-                int newIndex = EditorGUILayout.Popup(
-                    new GUIContent("Idioma Base",
-                        "Selecciona el idioma en que estan escritos los textos del canvas."),
-                    -1, BASE_LANG_LABELS);
-                if (newIndex >= 0)
-                {
-                    _baseLanguage.stringValue = BASE_LANG_CODES[newIndex];
-                }
-            }
-
-            EditorGUILayout.EndHorizontal();
+            _baseLanguage.stringValue = BASE_LANG_CODES[newIndex];
         }
     }
 
@@ -500,10 +641,10 @@ public class CanvasLocalizerEditor : Editor
         // --- Leyenda de colores ---
         EditorGUILayout.Space(2);
         EditorGUILayout.BeginHorizontal();
-        DrawColorLegend(new Color(0.3f, 0.7f, 0.3f, 0.3f), "En JSON");
-        DrawColorLegend(new Color(1f, 0.85f, 0.2f, 0.3f), "Nuevo");
-        DrawColorLegend(new Color(0.5f, 0.5f, 0.5f, 0.3f), "Excluido");
-        DrawColorLegend(new Color(1f, 0.2f, 0.2f, 0.3f), "Duplicada");
+        DrawColorLegend(new Color(0.3f, 0.7f, 0.3f, 1f), "En JSON");
+        DrawColorLegend(new Color(1f, 0.85f, 0.2f, 1f), "Nuevo");
+        DrawColorLegend(new Color(0.5f, 0.5f, 0.5f, 1f), "Excluido");
+        DrawColorLegend(new Color(1f, 0.2f, 0.2f, 1f), "Duplicada");
         EditorGUILayout.EndHorizontal();
 
         EditorGUILayout.Space(3);
@@ -529,10 +670,29 @@ public class CanvasLocalizerEditor : Editor
                 MessageType.Error);
         }
 
-        // --- Filtro de busqueda (mejora 6) ---
+        // --- Botones incluir/excluir todos + filtro ---
         EditorGUILayout.BeginHorizontal();
+        if (GUILayout.Button("Incluir todos", EditorStyles.miniButton, GUILayout.Width(85)))
+        {
+            for (int i = 0; i < _scanResults.Count; i++)
+            {
+                ScanEntry e = _scanResults[i];
+                e.excluded = false;
+                _scanResults[i] = e;
+            }
+        }
+        if (GUILayout.Button("Excluir todos", EditorStyles.miniButton, GUILayout.Width(85)))
+        {
+            for (int i = 0; i < _scanResults.Count; i++)
+            {
+                ScanEntry e = _scanResults[i];
+                e.excluded = true;
+                _scanResults[i] = e;
+            }
+        }
+        GUILayout.FlexibleSpace();
         EditorGUILayout.LabelField("Filtrar:", GUILayout.Width(42));
-        _searchFilter = EditorGUILayout.TextField(_searchFilter);
+        _searchFilter = EditorGUILayout.TextField(_searchFilter, GUILayout.MinWidth(60));
         if (!string.IsNullOrEmpty(_searchFilter))
         {
             if (GUILayout.Button("X", EditorStyles.miniButton, GUILayout.Width(20)))
@@ -549,33 +709,13 @@ public class CanvasLocalizerEditor : Editor
         // --- Cabecera de tabla ---
         EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
         GUILayout.Label("Incl.", EditorStyles.miniLabel, GUILayout.Width(32));
-        GUILayout.Label("Clave de Traduccion", EditorStyles.miniLabel, GUILayout.Width(220));
-        GUILayout.Label("Texto Actual", EditorStyles.miniLabel, GUILayout.MinWidth(140));
-        GUILayout.Label("Ruta", EditorStyles.miniLabel, GUILayout.Width(160));
+        GUILayout.Label("Clave de Traduccion", EditorStyles.miniLabel, GUILayout.MinWidth(120));
+        GUILayout.Label("Texto Actual", EditorStyles.miniLabel, GUILayout.MinWidth(100));
+        GUILayout.Label("Ruta", EditorStyles.miniLabel, GUILayout.Width(140));
         GUILayout.Label("", GUILayout.Width(20)); // Columna ping
         EditorGUILayout.EndHorizontal();
 
-        // --- Lista scrollable (altura dinamica, max 380px) ---
-        int visibleCount = 0;
-        if (filterLower == null)
-        {
-            visibleCount = _scanResults.Count;
-        }
-        else
-        {
-            for (int v = 0; v < _scanResults.Count; v++)
-            {
-                ScanEntry ve = _scanResults[v];
-                if (ve.generatedKey.ToLower().Contains(filterLower) ||
-                    ve.currentText.ToLower().Contains(filterLower) ||
-                    ve.objectPath.ToLower().Contains(filterLower))
-                    visibleCount++;
-            }
-        }
-        float rowHeight = 24f;
-        float scrollHeight = Mathf.Min(visibleCount * rowHeight + 4f, 380f);
-        if (scrollHeight < rowHeight) scrollHeight = rowHeight;
-        _scrollPos = EditorGUILayout.BeginScrollView(_scrollPos, GUILayout.Height(scrollHeight));
+        // --- Lista de textos (sin scroll interno, usa el scroll del Inspector) ---
 
         for (int i = 0; i < _scanResults.Count; i++)
         {
@@ -593,22 +733,20 @@ public class CanvasLocalizerEditor : Editor
             // Color de fondo segun estado
             Color bgColor;
             if (entry.excluded)
-                bgColor = new Color(0.5f, 0.5f, 0.5f, 0.3f);
+                bgColor = new Color(0.5f, 0.5f, 0.5f, 0.12f);
             else if (entry.existsInJson)
-                bgColor = new Color(0.3f, 0.7f, 0.3f, 0.15f);
+                bgColor = new Color(0.2f, 0.8f, 0.2f, 0.12f);
             else
-                bgColor = new Color(1f, 0.85f, 0.2f, 0.15f);
+                bgColor = new Color(1f, 0.8f, 0.1f, 0.12f);
 
-            // Claves duplicadas en rojo (mejora 4)
+            // Claves duplicadas en rojo
             bool isDuplicate = !entry.excluded &&
                 !string.IsNullOrEmpty(entry.generatedKey) &&
                 duplicateKeys.Contains(entry.generatedKey);
             if (isDuplicate)
-                bgColor = new Color(1f, 0.2f, 0.2f, 0.3f);
+                bgColor = new Color(1f, 0.15f, 0.15f, 0.2f);
 
-            GUI.backgroundColor = bgColor;
             EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
-            GUI.backgroundColor = Color.white;
 
             // Checkbox incluir (invertido: check = incluido)
             bool included = EditorGUILayout.Toggle(
@@ -621,30 +759,27 @@ public class CanvasLocalizerEditor : Editor
 
             // Clave editable
             string newKey = EditorGUILayout.TextField(
-                entry.generatedKey, GUILayout.Width(220));
+                entry.generatedKey, GUILayout.MinWidth(120));
             if (newKey != entry.generatedKey)
             {
                 entry.generatedKey = newKey;
                 _scanResults[i] = entry;
             }
 
-            // Texto actual (solo lectura, truncado con tooltip completo - mejora 3)
+            // Texto actual (solo lectura, con tooltip completo)
             string fullText = entry.currentText.Replace("\n", " ").Replace("\r", "");
-            string displayText = fullText;
-            if (displayText.Length > 45)
-                displayText = displayText.Substring(0, 42) + "...";
             EditorGUILayout.LabelField(
-                new GUIContent(displayText, fullText),
-                GUILayout.MinWidth(140));
+                new GUIContent(fullText, fullText),
+                GUILayout.MinWidth(100));
 
-            // Ruta en la jerarquia (con tooltip completo - mejora 3)
+            // Ruta en la jerarquia (con tooltip completo)
             string displayPath = entry.objectPath;
             string fullPath = entry.objectPath;
-            if (displayPath.Length > 28)
-                displayPath = "..." + displayPath.Substring(displayPath.Length - 25);
+            if (displayPath.Length > 24)
+                displayPath = "..." + displayPath.Substring(displayPath.Length - 21);
             EditorGUILayout.LabelField(
                 new GUIContent(displayPath, fullPath),
-                EditorStyles.miniLabel, GUILayout.Width(160));
+                EditorStyles.miniLabel, GUILayout.Width(140));
 
             // Boton ping para seleccionar el GameObject en la jerarquia (mejora 2)
             if (entry.component != null)
@@ -663,9 +798,11 @@ public class CanvasLocalizerEditor : Editor
             }
 
             EditorGUILayout.EndHorizontal();
-        }
 
-        EditorGUILayout.EndScrollView();
+            // Dibujar rectangulo de color sobre la fila ya renderizada
+            Rect rowRect = GUILayoutUtility.GetLastRect();
+            EditorGUI.DrawRect(rowRect, bgColor);
+        }
 
         EditorGUILayout.Space(5);
 
@@ -787,8 +924,11 @@ public class CanvasLocalizerEditor : Editor
             translations[baseLang] = new Dictionary<string, string>();
         }
 
-        int added = 0;
-        int updated = 0;
+        // ============================================================
+        // Calcular cambios antes de escribir (vista previa)
+        // ============================================================
+        List<string> newKeys = new List<string>();
+        List<string> updatedKeys = new List<string>();
 
         for (int i = 0; i < _scanResults.Count; i++)
         {
@@ -801,16 +941,73 @@ public class CanvasLocalizerEditor : Editor
 
             if (!translations[baseLang].ContainsKey(key))
             {
-                translations[baseLang][key] = value;
-                added++;
+                newKeys.Add(key);
             }
-            else
+            else if (translations[baseLang][key] != value)
             {
-                // Actualizar si el texto cambio
-                if (translations[baseLang][key] != value)
+                updatedKeys.Add(key);
+            }
+        }
+
+        // Mostrar vista previa y pedir confirmacion
+        if (newKeys.Count > 0 || updatedKeys.Count > 0)
+        {
+            StringBuilder preview = new StringBuilder();
+            preview.AppendLine($"Idioma base: '{baseLang}'");
+            preview.AppendLine($"Archivo: {assetPath}\n");
+
+            if (newKeys.Count > 0)
+            {
+                preview.AppendLine($"--- Claves nuevas ({newKeys.Count}) ---");
+                for (int i = 0; i < newKeys.Count && i < 20; i++)
+                    preview.AppendLine($"  + {newKeys[i]}");
+                if (newKeys.Count > 20)
+                    preview.AppendLine($"  ... y {newKeys.Count - 20} mas");
+                preview.AppendLine();
+            }
+
+            if (updatedKeys.Count > 0)
+            {
+                preview.AppendLine($"--- Claves actualizadas ({updatedKeys.Count}) ---");
+                for (int i = 0; i < updatedKeys.Count && i < 20; i++)
+                    preview.AppendLine($"  ~ {updatedKeys[i]}");
+                if (updatedKeys.Count > 20)
+                    preview.AppendLine($"  ... y {updatedKeys.Count - 20} mas");
+            }
+
+            if (!EditorUtility.DisplayDialog("Confirmar Exportacion",
+                preview.ToString(), "Exportar", "Cancelar"))
+            {
+                return;
+            }
+        }
+
+        // ============================================================
+        // Aplicar cambios al diccionario
+        // ============================================================
+        for (int i = 0; i < newKeys.Count; i++)
+        {
+            string key = newKeys[i];
+            // Buscar el valor del scanResult correspondiente
+            for (int j = 0; j < _scanResults.Count; j++)
+            {
+                if (!_scanResults[j].excluded && _scanResults[j].generatedKey == key)
                 {
-                    translations[baseLang][key] = value;
-                    updated++;
+                    translations[baseLang][key] = _scanResults[j].currentText;
+                    break;
+                }
+            }
+        }
+
+        for (int i = 0; i < updatedKeys.Count; i++)
+        {
+            string key = updatedKeys[i];
+            for (int j = 0; j < _scanResults.Count; j++)
+            {
+                if (!_scanResults[j].excluded && _scanResults[j].generatedKey == key)
+                {
+                    translations[baseLang][key] = _scanResults[j].currentText;
+                    break;
                 }
             }
         }
@@ -821,7 +1018,6 @@ public class CanvasLocalizerEditor : Editor
         string newJson = WriteDictionaryToJson(translations);
         File.WriteAllText(fullPath, newJson, Encoding.UTF8);
 
-        // Refrescar para que Unity detecte el archivo nuevo/modificado
         AssetDatabase.Refresh();
 
         // ============================================================
@@ -829,7 +1025,6 @@ public class CanvasLocalizerEditor : Editor
         // ============================================================
         if (textAsset == null)
         {
-            // Cargar el TextAsset recien creado
             TextAsset newAsset = AssetDatabase.LoadAssetAtPath<TextAsset>(assetPath);
             if (newAsset != null && tfProp != null)
             {
@@ -839,25 +1034,13 @@ public class CanvasLocalizerEditor : Editor
             }
         }
 
+        int added = newKeys.Count;
+        int updated = updatedKeys.Count;
         Debug.Log($"[CanvasLocalizer] JSON exportado: {added} nuevas, {updated} actualizadas. " +
                   $"Archivo: {assetPath}");
 
         // Aplicar a los arrays serializados
         ApplyToArrays();
-
-        // Dialogo
-        string msg = $"Exportacion completada.\n\n" +
-                     $"Claves nuevas: {added}\n" +
-                     $"Claves actualizadas: {updated}\n" +
-                     $"Idioma base: '{baseLang}'\n" +
-                     $"Archivo: {assetPath}";
-
-        if (added > 0)
-        {
-            msg += "\n\nAgrega las traducciones para otros idiomas editando el JSON.";
-        }
-
-        EditorUtility.DisplayDialog("Exportacion Completa", msg, "OK");
     }
 
     // =====================================================================

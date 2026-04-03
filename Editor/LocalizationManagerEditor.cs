@@ -34,9 +34,6 @@ public class LocalizationManagerEditor : Editor
     private bool _showValidation = false;
     private bool _showPreview = false;
     private string _previewLanguage = "en";
-    private Vector2 _previewScroll;
-    private Vector2 _validationScroll;
-    private Vector2 _canvasSearchScroll;
     private static List<CanvasSearchResult> _canvasSearchResults;
 
     // Cache del JSON
@@ -80,8 +77,22 @@ public class LocalizationManagerEditor : Editor
         // === CONFIGURACION BASICA ===
         EditorGUILayout.PropertyField(_translationFile,
             new GUIContent("Archivo de Traducciones"));
-        EditorGUILayout.PropertyField(_fallbackLanguage,
-            new GUIContent("Idioma de Fallback"));
+
+        // Idioma de Fallback como dropdown
+        string currentFallback = _fallbackLanguage.stringValue;
+        int fbIndex = -1;
+        for (int i = 0; i < IdiomasLanguages.Codes.Length; i++)
+        {
+            if (IdiomasLanguages.Codes[i] == currentFallback) { fbIndex = i; break; }
+        }
+        int newFbIndex = EditorGUILayout.Popup(
+            new GUIContent("Idioma de Fallback",
+                "Si el idioma del jugador no existe en el JSON, se usa este."),
+            fbIndex, IdiomasLanguages.PopupLabelsLatin);
+        if (newFbIndex >= 0 && newFbIndex != fbIndex)
+        {
+            _fallbackLanguage.stringValue = IdiomasLanguages.Codes[newFbIndex];
+        }
 
         RefreshCache();
 
@@ -110,7 +121,9 @@ public class LocalizationManagerEditor : Editor
         {
             int listenerCount = _listeners != null ? _listeners.arraySize : 0;
             EditorGUILayout.LabelField(
-                $"Idiomas: {_cachedLanguages.Length} ({string.Join(", ", _cachedLanguages)})  |  " +
+                $"Idiomas: {_cachedLanguages.Length} ({string.Join(", ", _cachedLanguages)})",
+                EditorStyles.wordWrappedLabel);
+            EditorGUILayout.LabelField(
                 $"Claves: {(_cachedKeys != null ? _cachedKeys.Length : 0)}  |  " +
                 $"Canvas: {_canvasLocalizers.arraySize}  |  " +
                 $"Textos: {_localizers.arraySize}  |  " +
@@ -175,10 +188,18 @@ public class LocalizationManagerEditor : Editor
         if (_showLocalizers)
         {
             EditorGUI.indentLevel++;
+
+            EditorGUILayout.HelpBox(
+                "Los localizers se registran automaticamente al exportar desde cada CanvasLocalizer " +
+                "o al asignar un TextLocalizer. Usa el boton si necesitas re-sincronizar.",
+                MessageType.Info);
+
             if (GUILayout.Button("Auto-buscar todo en la escena"))
             {
                 AutoFindAll();
             }
+
+            EditorGUILayout.Space(3);
             EditorGUILayout.PropertyField(_localizers,
                 new GUIContent($"TextLocalizers ({_localizers.arraySize})"), true);
             EditorGUILayout.PropertyField(_canvasLocalizers,
@@ -407,8 +428,6 @@ public class LocalizationManagerEditor : Editor
             return;
         }
 
-        _validationScroll = EditorGUILayout.BeginScrollView(_validationScroll, GUILayout.MaxHeight(300));
-
         for (int i = 0; i < _validationMessages.Count; i++)
         {
             MessageType msgType = _validationMessageTypes[i] == 1 ? MessageType.Warning : MessageType.Info;
@@ -430,8 +449,6 @@ public class LocalizationManagerEditor : Editor
                 $"Resumen: {_validationWarningCount} claves faltantes",
                 EditorStyles.helpBox);
         }
-
-        EditorGUILayout.EndScrollView();
     }
 
     private void RunValidation(bool fullCheck)
@@ -556,7 +573,6 @@ public class LocalizationManagerEditor : Editor
         EditorGUILayout.EndHorizontal();
 
         EditorGUILayout.Space(3);
-        _previewScroll = EditorGUILayout.BeginScrollView(_previewScroll, GUILayout.MaxHeight(300));
 
         if (_cachedData.TryGetValue(_previewLanguage, out DataToken lt) &&
             lt.TokenType == TokenType.DataDictionary)
@@ -566,13 +582,11 @@ public class LocalizationManagerEditor : Editor
             for (int i = 0; i < keys.Count; i++)
             {
                 EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.LabelField(keys[i].String, GUILayout.Width(200));
+                EditorGUILayout.LabelField(keys[i].String, GUILayout.MinWidth(120));
                 EditorGUILayout.LabelField(ld[keys[i].String].String, EditorStyles.wordWrappedLabel);
                 EditorGUILayout.EndHorizontal();
             }
         }
-
-        EditorGUILayout.EndScrollView();
     }
 
     // =====================================================================
@@ -679,6 +693,38 @@ public class LocalizationManagerEditor : Editor
         return name;
     }
 
+    /// <summary>
+    /// Genera un canvasId unico basado en el nombre del GameObject.
+    /// Verifica todos los CanvasLocalizer de la escena para evitar colisiones.
+    /// </summary>
+    private static string GenerateUniqueCanvasId(string goName, CanvasLocalizer self)
+    {
+        string baseName = NormalizeCanvasId(goName);
+        if (string.IsNullOrEmpty(baseName)) baseName = "canvas";
+
+        // Recopilar IDs existentes de otros CanvasLocalizer en la escena
+        HashSet<string> usedIds = new HashSet<string>();
+        CanvasLocalizer[] allLocalizers = Object.FindObjectsOfType<CanvasLocalizer>(true);
+        for (int i = 0; i < allLocalizers.Length; i++)
+        {
+            if (allLocalizers[i] == self) continue;
+            string otherId = allLocalizers[i].GetCanvasId();
+            if (!string.IsNullOrEmpty(otherId))
+                usedIds.Add(otherId);
+        }
+
+        // Asegurar unicidad con sufijo numerico
+        string finalId = baseName;
+        int counter = 2;
+        while (usedIds.Contains(finalId))
+        {
+            finalId = baseName + "_" + counter;
+            counter++;
+        }
+
+        return finalId;
+    }
+
     private void DrawCanvasSearch()
     {
         EditorGUILayout.Space(3);
@@ -720,7 +766,6 @@ public class LocalizationManagerEditor : Editor
             EditorStyles.helpBox);
 
         EditorGUILayout.Space(3);
-        _canvasSearchScroll = EditorGUILayout.BeginScrollView(_canvasSearchScroll, GUILayout.MaxHeight(350));
 
         // --- Candidatos (sin CanvasLocalizer, con textos) ---
         for (int i = 0; i < _canvasSearchResults.Count; i++)
@@ -842,8 +887,6 @@ public class LocalizationManagerEditor : Editor
             grayStyle.normal.textColor = Color.gray;
             EditorGUILayout.LabelField($"  {r.gameObject.name}", grayStyle);
         }
-
-        EditorGUILayout.EndScrollView();
     }
 
     private void RemoveCanvasLocalizerFrom(CanvasSearchResult result)
@@ -853,9 +896,12 @@ public class LocalizationManagerEditor : Editor
         if (cl == null) return;
 
         string canvasId = cl.GetCanvasId();
+        int textCount = cl.GetTextCount();
         if (!EditorUtility.DisplayDialog("Quitar CanvasLocalizer",
             $"Quitar CanvasLocalizer de \"{go.name}\"?\n" +
-            $"(canvasId: \"{canvasId}\")\n\n" +
+            $"(canvasId: \"{canvasId}\", {textCount} textos)\n\n" +
+            "Las claves con prefijo \"" + canvasId + "_\" seguiran en el JSON.\n" +
+            "Si no las necesitas, borralas manualmente del archivo de traducciones.\n\n" +
             "Puedes deshacerlo con Ctrl+Z.",
             "Quitar", "Cancelar"))
         {
@@ -903,13 +949,16 @@ public class LocalizationManagerEditor : Editor
             return;
         }
 
-        // Asignar el LocalizationManager y el canvasId sugerido
+        // Asignar el LocalizationManager y un canvasId unico
         SerializedObject clSO = new SerializedObject(newCL);
         SerializedProperty mgrProp = clSO.FindProperty("manager");
         SerializedProperty idProp = clSO.FindProperty("canvasId");
 
         if (mgrProp != null) mgrProp.objectReferenceValue = mgr;
-        if (idProp != null) idProp.stringValue = NormalizeCanvasId(go.name);
+
+        // Generar ID unico: normalizar nombre + verificar colisiones
+        string uniqueId = GenerateUniqueCanvasId(go.name, newCL);
+        if (idProp != null) idProp.stringValue = uniqueId;
 
         clSO.ApplyModifiedProperties();
 
@@ -918,7 +967,7 @@ public class LocalizationManagerEditor : Editor
 
         EditorUtility.SetDirty(go);
 
-        Debug.Log($"[Idiomas] CanvasLocalizer anadido a \"{go.name}\" con canvasId=\"{NormalizeCanvasId(go.name)}\".");
+        Debug.Log($"[Idiomas] CanvasLocalizer anadido a \"{go.name}\" con canvasId=\"{uniqueId}\".");
 
         // Seleccionar el objeto para que el usuario vea el nuevo componente
         Selection.activeGameObject = go;
