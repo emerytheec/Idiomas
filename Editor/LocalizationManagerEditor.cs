@@ -5,6 +5,8 @@ using TMPro;
 using UdonSharp;
 using UdonSharpEditor;
 using System.Collections.Generic;
+using System.IO;
+using System.Text;
 using System.Text.RegularExpressions;
 using VRC.SDK3.Data;
 using VRC.Udon;
@@ -26,12 +28,10 @@ public class LocalizationManagerEditor : Editor
     private SerializedProperty _listeners;
 
     // Estado del editor (foldouts)
-    private bool _showLocalizers = false;
     private bool _showCanvasSearch = true;
     private bool _showTools = false;
     private bool _showListeners = false;
     private bool _showDropdown = false;
-    private bool _showValidation = false;
     private bool _showPreview = false;
     private string _previewLanguage = "en";
     private static List<CanvasSearchResult> _canvasSearchResults;
@@ -42,14 +42,7 @@ public class LocalizationManagerEditor : Editor
     private string[] _cachedLanguages;
     private string[] _cachedKeys;
 
-    // Cache de validacion (bajo demanda)
-    private List<string> _validationMessages;
-    private List<int> _validationMessageTypes; // 0=info, 1=warning
-    private int _validationWarningCount;
-    private int _validationTodoCount;
-    private int _validationEmptyCount;
-    private bool _validationIncludesFullCheck;
-    private bool _validationExecuted;
+
 
     private void OnEnable()
     {
@@ -142,10 +135,10 @@ public class LocalizationManagerEditor : Editor
             EditorGUI.indentLevel--;
         }
 
-        // === HERRAMIENTAS (colapsado por defecto) ===
+        // === TRADUCCION (colapsado por defecto) ===
         EditorGUILayout.Space(5);
         _showTools = EditorGUILayout.Foldout(_showTools,
-            "Herramientas", true, EditorStyles.foldoutHeader);
+            "Traduccion", true, EditorStyles.foldoutHeader);
         if (_showTools)
         {
             EditorGUI.indentLevel++;
@@ -159,15 +152,6 @@ public class LocalizationManagerEditor : Editor
             }
             GUI.backgroundColor = Color.white;
 
-            // Validacion de Claves
-            EditorGUILayout.Space(5);
-            _showValidation = EditorGUILayout.Foldout(_showValidation,
-                "Validacion de Claves", true);
-            if (_showValidation)
-            {
-                DrawValidation();
-            }
-
             // Vista Previa de Traducciones
             EditorGUILayout.Space(3);
             _showPreview = EditorGUILayout.Foldout(_showPreview,
@@ -177,33 +161,6 @@ public class LocalizationManagerEditor : Editor
                 DrawPreview();
             }
 
-            EditorGUI.indentLevel--;
-        }
-
-        // === LOCALIZERS (colapsado por defecto) ===
-        EditorGUILayout.Space(5);
-        _showLocalizers = EditorGUILayout.Foldout(_showLocalizers,
-            $"Localizers ({_localizers.arraySize} textos, {_canvasLocalizers.arraySize} canvas)",
-            true, EditorStyles.foldoutHeader);
-        if (_showLocalizers)
-        {
-            EditorGUI.indentLevel++;
-
-            EditorGUILayout.HelpBox(
-                "Los localizers se registran automaticamente al exportar desde cada CanvasLocalizer " +
-                "o al asignar un TextLocalizer. Usa el boton si necesitas re-sincronizar.",
-                MessageType.Info);
-
-            if (GUILayout.Button("Auto-buscar todo en la escena"))
-            {
-                AutoFindAll();
-            }
-
-            EditorGUILayout.Space(3);
-            EditorGUILayout.PropertyField(_localizers,
-                new GUIContent($"TextLocalizers ({_localizers.arraySize})"), true);
-            EditorGUILayout.PropertyField(_canvasLocalizers,
-                new GUIContent($"CanvasLocalizers ({_canvasLocalizers.arraySize})"), true);
             EditorGUI.indentLevel--;
         }
 
@@ -336,38 +293,6 @@ public class LocalizationManagerEditor : Editor
     // Auto-buscar
     // =====================================================================
 
-    private void AutoFindAll()
-    {
-        LocalizationManager mgr = (LocalizationManager)target;
-
-        // TextLocalizers
-        TextLocalizer[] allTL = FindObjectsByType<TextLocalizer>(FindObjectsSortMode.None);
-        List<TextLocalizer> matchTL = new List<TextLocalizer>();
-        for (int i = 0; i < allTL.Length; i++)
-        {
-            LocalizationManager tlMgr = allTL[i].GetManager();
-            if (tlMgr == mgr || tlMgr == null) matchTL.Add(allTL[i]);
-        }
-        _localizers.arraySize = matchTL.Count;
-        for (int i = 0; i < matchTL.Count; i++)
-            _localizers.GetArrayElementAtIndex(i).objectReferenceValue = matchTL[i];
-
-        // CanvasLocalizers
-        CanvasLocalizer[] allCL = FindObjectsByType<CanvasLocalizer>(FindObjectsSortMode.None);
-        List<CanvasLocalizer> matchCL = new List<CanvasLocalizer>();
-        for (int i = 0; i < allCL.Length; i++)
-        {
-            LocalizationManager clMgr = allCL[i].GetManager();
-            if (clMgr == mgr || clMgr == null) matchCL.Add(allCL[i]);
-        }
-        _canvasLocalizers.arraySize = matchCL.Count;
-        for (int i = 0; i < matchCL.Count; i++)
-            _canvasLocalizers.GetArrayElementAtIndex(i).objectReferenceValue = matchCL[i];
-
-        serializedObject.ApplyModifiedProperties();
-        Debug.Log($"[Idiomas] Encontrados: {matchTL.Count} TextLocalizer(s), {matchCL.Count} CanvasLocalizer(s).");
-    }
-
     // =====================================================================
     // Auto-Traducir
     // =====================================================================
@@ -388,166 +313,6 @@ public class LocalizationManagerEditor : Editor
     // =====================================================================
     // Validacion (bajo demanda, con cache de resultados)
     // =====================================================================
-
-    private void DrawValidation()
-    {
-        if (_cachedData == null)
-        {
-            EditorGUILayout.HelpBox("Asigna un archivo JSON.", MessageType.Info);
-            return;
-        }
-
-        // Botones de validacion
-        EditorGUILayout.BeginHorizontal();
-        if (GUILayout.Button("Verificar Claves de Localizers"))
-        {
-            RunValidation(false);
-        }
-        if (GUILayout.Button("Verificar Integridad Completa"))
-        {
-            RunValidation(true);
-        }
-        EditorGUILayout.EndHorizontal();
-
-        // Mostrar resultados cacheados
-        if (!_validationExecuted)
-        {
-            EditorGUILayout.HelpBox(
-                "Pulsa un boton para ejecutar la validacion.",
-                MessageType.Info);
-            return;
-        }
-
-        if (_validationMessages == null || _validationMessages.Count == 0)
-        {
-            EditorGUILayout.HelpBox(
-                _validationIncludesFullCheck
-                    ? "Sin problemas. Todas las claves existen en todos los idiomas, sin [TODO:] ni vacios."
-                    : "Todas las claves de los localizers existen en todos los idiomas.",
-                MessageType.Info);
-            return;
-        }
-
-        for (int i = 0; i < _validationMessages.Count; i++)
-        {
-            MessageType msgType = _validationMessageTypes[i] == 1 ? MessageType.Warning : MessageType.Info;
-            EditorGUILayout.HelpBox(_validationMessages[i], msgType);
-        }
-
-        // Resumen
-        if (_validationIncludesFullCheck)
-        {
-            EditorGUILayout.Space(3);
-            EditorGUILayout.LabelField(
-                $"Resumen: {_validationWarningCount} faltantes, {_validationTodoCount} [TODO:], {_validationEmptyCount} vacios",
-                EditorStyles.helpBox);
-        }
-        else if (_validationWarningCount > 0)
-        {
-            EditorGUILayout.Space(3);
-            EditorGUILayout.LabelField(
-                $"Resumen: {_validationWarningCount} claves faltantes",
-                EditorStyles.helpBox);
-        }
-    }
-
-    private void RunValidation(bool fullCheck)
-    {
-        _validationMessages = new List<string>();
-        _validationMessageTypes = new List<int>();
-        _validationWarningCount = 0;
-        _validationTodoCount = 0;
-        _validationEmptyCount = 0;
-        _validationIncludesFullCheck = fullCheck;
-        _validationExecuted = true;
-
-        // --- Verificar claves faltantes en localizers ---
-
-        // TextLocalizers
-        for (int i = 0; i < _localizers.arraySize; i++)
-        {
-            Object obj = _localizers.GetArrayElementAtIndex(i).objectReferenceValue;
-            if (obj == null) continue;
-            TextLocalizer tl = obj as TextLocalizer;
-            if (tl == null) continue;
-            string key = tl.GetTranslationKey();
-            if (string.IsNullOrEmpty(key)) continue;
-            CheckKeyCached(tl.gameObject.name, key);
-        }
-
-        // CanvasLocalizers
-        for (int c = 0; c < _canvasLocalizers.arraySize; c++)
-        {
-            Object clObj = _canvasLocalizers.GetArrayElementAtIndex(c).objectReferenceValue;
-            if (clObj == null) continue;
-            SerializedObject clSO = new SerializedObject(clObj);
-            string clName = ((CanvasLocalizer)clObj).gameObject.name;
-
-            SerializedProperty tmpKeys = clSO.FindProperty("tmpKeys");
-            if (tmpKeys != null)
-                for (int k = 0; k < tmpKeys.arraySize; k++)
-                {
-                    string key = tmpKeys.GetArrayElementAtIndex(k).stringValue;
-                    if (!string.IsNullOrEmpty(key)) CheckKeyCached(clName, key);
-                }
-
-            SerializedProperty legKeys = clSO.FindProperty("legacyKeys");
-            if (legKeys != null)
-                for (int k = 0; k < legKeys.arraySize; k++)
-                {
-                    string key = legKeys.GetArrayElementAtIndex(k).stringValue;
-                    if (!string.IsNullOrEmpty(key)) CheckKeyCached(clName, key);
-                }
-        }
-
-        // --- Verificacion completa del JSON (traducciones [TODO:] y vacias) ---
-        if (fullCheck)
-        {
-            for (int i = 0; i < _cachedLanguages.Length; i++)
-            {
-                string lang = _cachedLanguages[i];
-                if (!_cachedData.TryGetValue(lang, out DataToken lt) ||
-                    lt.TokenType != TokenType.DataDictionary) continue;
-
-                DataDictionary langDict = lt.DataDictionary;
-                DataList keys = langDict.GetKeys();
-                for (int k = 0; k < keys.Count; k++)
-                {
-                    string key = keys[k].String;
-                    if (!langDict.TryGetValue(key, out DataToken val)) continue;
-                    string value = val.String;
-
-                    if (value.StartsWith("[TODO:"))
-                    {
-                        _validationMessages.Add($"[TODO] '{lang}' > '{key}': {value}");
-                        _validationMessageTypes.Add(1);
-                        _validationTodoCount++;
-                    }
-                    else if (string.IsNullOrEmpty(value) || string.IsNullOrWhiteSpace(value))
-                    {
-                        _validationMessages.Add($"[VACIO] '{lang}' > '{key}'");
-                        _validationMessageTypes.Add(1);
-                        _validationEmptyCount++;
-                    }
-                }
-            }
-        }
-    }
-
-    private void CheckKeyCached(string owner, string key)
-    {
-        for (int j = 0; j < _cachedLanguages.Length; j++)
-        {
-            if (_cachedData.TryGetValue(_cachedLanguages[j], out DataToken lt) &&
-                lt.TokenType == TokenType.DataDictionary &&
-                !lt.DataDictionary.ContainsKey(key))
-            {
-                _validationMessages.Add($"'{owner}': '{key}' falta en '{_cachedLanguages[j]}'");
-                _validationMessageTypes.Add(1);
-                _validationWarningCount++;
-            }
-        }
-    }
 
     // =====================================================================
     // Vista previa
@@ -842,7 +607,18 @@ public class LocalizationManagerEditor : Editor
                 hasLocalized = true;
             }
 
-            EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
+            CanvasLocalizer cl = r.gameObject.GetComponent<CanvasLocalizer>();
+            string clId = cl != null ? cl.GetCanvasId() : "";
+
+            // Obtener claves del componente y contar cuantas estan en el JSON
+            List<string> clKeys = GetCanvasLocalizerKeys(cl);
+            int keysInJson = CountKeysInJson(clKeys);
+            int totalKeys = clKeys.Count;
+
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+
+            // Linea 1: nombre + info + estado JSON
+            EditorGUILayout.BeginHorizontal();
 
             GUIStyle greenStyle = new GUIStyle(EditorStyles.label);
             greenStyle.normal.textColor = new Color(0.2f, 0.7f, 0.2f);
@@ -851,11 +627,51 @@ public class LocalizationManagerEditor : Editor
                 EditorGUIUtility.PingObject(r.gameObject);
             }
 
-            CanvasLocalizer cl = r.gameObject.GetComponent<CanvasLocalizer>();
-            string clId = cl != null ? cl.GetCanvasId() : "";
             EditorGUILayout.LabelField(
                 $"canvasId: \"{clId}\"  |  {r.tmpCount + r.legacyCount} textos",
                 EditorStyles.miniLabel);
+
+            // Indicador de estado en el JSON
+            GUIStyle jsonStatusStyle = new GUIStyle(EditorStyles.miniLabel);
+            jsonStatusStyle.fontStyle = FontStyle.Bold;
+            string jsonStatusText;
+            if (totalKeys == 0)
+            {
+                jsonStatusStyle.normal.textColor = new Color(0.8f, 0.5f, 0.0f);
+                jsonStatusText = "Sin claves asignadas";
+            }
+            else if (keysInJson == 0)
+            {
+                jsonStatusStyle.normal.textColor = new Color(0.9f, 0.3f, 0.0f);
+                jsonStatusText = $"JSON: 0/{totalKeys} (sin exportar)";
+            }
+            else if (keysInJson < totalKeys)
+            {
+                jsonStatusStyle.normal.textColor = new Color(0.8f, 0.7f, 0.0f);
+                jsonStatusText = $"JSON: {keysInJson}/{totalKeys} (parcial)";
+            }
+            else
+            {
+                jsonStatusStyle.normal.textColor = new Color(0.2f, 0.7f, 0.2f);
+                jsonStatusText = $"JSON: {keysInJson}/{totalKeys}";
+            }
+            EditorGUILayout.LabelField(jsonStatusText, jsonStatusStyle, GUILayout.Width(160));
+
+            EditorGUILayout.EndHorizontal();
+
+            // Linea 2: botones alineados a la derecha
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.FlexibleSpace();
+
+            // Boton para limpiar claves del JSON
+            EditorGUI.BeginDisabledGroup(keysInJson == 0);
+            GUI.backgroundColor = new Color(1f, 0.7f, 0.3f);
+            if (GUILayout.Button($"Limpiar JSON ({keysInJson})", GUILayout.Width(130)))
+            {
+                RemoveKeysFromJson(cl, clKeys, keysInJson);
+            }
+            GUI.backgroundColor = Color.white;
+            EditorGUI.EndDisabledGroup();
 
             // Boton para quitar CanvasLocalizer
             GUI.backgroundColor = new Color(1f, 0.4f, 0.4f);
@@ -866,6 +682,8 @@ public class LocalizationManagerEditor : Editor
             GUI.backgroundColor = Color.white;
 
             EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.EndVertical();
         }
 
         // --- Sin textos ---
@@ -972,6 +790,226 @@ public class LocalizationManagerEditor : Editor
         // Seleccionar el objeto para que el usuario vea el nuevo componente
         Selection.activeGameObject = go;
         EditorGUIUtility.PingObject(go);
+    }
+
+    // =====================================================================
+    // Gestion de claves JSON por CanvasLocalizer
+    // =====================================================================
+
+    /// <summary>
+    /// Obtiene todas las claves (tmpKeys + legacyKeys) de un CanvasLocalizer.
+    /// </summary>
+    private List<string> GetCanvasLocalizerKeys(CanvasLocalizer cl)
+    {
+        List<string> keys = new List<string>();
+        if (cl == null) return keys;
+
+        SerializedObject clSO = new SerializedObject(cl);
+
+        SerializedProperty tmpKeys = clSO.FindProperty("tmpKeys");
+        if (tmpKeys != null)
+        {
+            for (int i = 0; i < tmpKeys.arraySize; i++)
+            {
+                string key = tmpKeys.GetArrayElementAtIndex(i).stringValue;
+                if (!string.IsNullOrEmpty(key)) keys.Add(key);
+            }
+        }
+
+        SerializedProperty legKeys = clSO.FindProperty("legacyKeys");
+        if (legKeys != null)
+        {
+            for (int i = 0; i < legKeys.arraySize; i++)
+            {
+                string key = legKeys.GetArrayElementAtIndex(i).stringValue;
+                if (!string.IsNullOrEmpty(key)) keys.Add(key);
+            }
+        }
+
+        return keys;
+    }
+
+    /// <summary>
+    /// Cuenta cuantas claves de la lista existen en al menos un idioma del JSON cacheado.
+    /// </summary>
+    private int CountKeysInJson(List<string> keys)
+    {
+        if (_cachedData == null || _cachedLanguages == null || keys.Count == 0) return 0;
+
+        int count = 0;
+        for (int i = 0; i < keys.Count; i++)
+        {
+            for (int j = 0; j < _cachedLanguages.Length; j++)
+            {
+                if (_cachedData.TryGetValue(_cachedLanguages[j], out DataToken lt) &&
+                    lt.TokenType == TokenType.DataDictionary &&
+                    lt.DataDictionary.ContainsKey(keys[i]))
+                {
+                    count++;
+                    break;
+                }
+            }
+        }
+        return count;
+    }
+
+    /// <summary>
+    /// Elimina las claves de un CanvasLocalizer del archivo JSON de traducciones.
+    /// </summary>
+    private void RemoveKeysFromJson(CanvasLocalizer cl, List<string> keys, int keysInJson)
+    {
+        if (keys.Count == 0 || keysInJson == 0) return;
+
+        TextAsset ta = _translationFile.objectReferenceValue as TextAsset;
+        if (ta == null)
+        {
+            EditorUtility.DisplayDialog("Sin Archivo",
+                "No hay archivo de traducciones asignado.", "OK");
+            return;
+        }
+
+        string canvasId = cl.GetCanvasId();
+        if (!EditorUtility.DisplayDialog("Limpiar claves del JSON",
+            $"Eliminar {keysInJson} clave(s) del canvas \"{canvasId}\" del archivo JSON?\n\n" +
+            $"Se eliminaran de TODOS los idiomas.\n" +
+            "Puedes deshacerlo con Ctrl+Z en el editor de texto, pero no en Unity.",
+            "Eliminar", "Cancelar"))
+        {
+            return;
+        }
+
+        string assetPath = AssetDatabase.GetAssetPath(ta);
+        string fullPath = Path.GetFullPath(assetPath);
+        string jsonContent = File.ReadAllText(fullPath, Encoding.UTF8);
+
+        // Parsear JSON a diccionario editable
+        var translations = ParseJsonToDictionary(jsonContent);
+        if (translations == null)
+        {
+            EditorUtility.DisplayDialog("Error", "No se pudo parsear el JSON.", "OK");
+            return;
+        }
+
+        // Crear HashSet para busqueda rapida
+        HashSet<string> keysToRemove = new HashSet<string>(keys);
+
+        // Eliminar claves de todos los idiomas
+        int totalRemoved = 0;
+        foreach (var langPair in translations)
+        {
+            List<string> toRemove = new List<string>();
+            foreach (string key in langPair.Value.Keys)
+            {
+                if (keysToRemove.Contains(key))
+                    toRemove.Add(key);
+            }
+            for (int i = 0; i < toRemove.Count; i++)
+            {
+                langPair.Value.Remove(toRemove[i]);
+                totalRemoved++;
+            }
+        }
+
+        if (totalRemoved == 0)
+        {
+            EditorUtility.DisplayDialog("Sin cambios",
+                "No se encontraron claves para eliminar.", "OK");
+            return;
+        }
+
+        // Escribir JSON actualizado
+        string newJson = WriteDictionaryToJson(translations);
+        File.WriteAllText(fullPath, newJson, Encoding.UTF8);
+        AssetDatabase.Refresh();
+
+        // Invalidar cache para que se recargue
+        _cachedJsonHash = null;
+
+        Debug.Log($"[Idiomas] Eliminadas {totalRemoved} entradas del JSON (canvas \"{canvasId}\").");
+        EditorUtility.DisplayDialog("Listo",
+            $"Se eliminaron {totalRemoved} entradas del JSON\n" +
+            $"({keysInJson} claves x {totalRemoved / Mathf.Max(keysInJson, 1)} idiomas).",
+            "OK");
+    }
+
+    // =====================================================================
+    // Parseo y escritura de JSON (mismo patron que CanvasLocalizerEditor)
+    // =====================================================================
+
+    private Dictionary<string, Dictionary<string, string>> ParseJsonToDictionary(string json)
+    {
+        if (!VRCJson.TryDeserializeFromJson(json, out DataToken data)) return null;
+        if (data.TokenType != TokenType.DataDictionary) return null;
+
+        var result = new Dictionary<string, Dictionary<string, string>>();
+        DataDictionary rootDict = data.DataDictionary;
+        DataList langs = rootDict.GetKeys();
+
+        for (int i = 0; i < langs.Count; i++)
+        {
+            string lang = langs[i].String;
+            if (!rootDict.TryGetValue(lang, out DataToken langToken)) continue;
+            if (langToken.TokenType != TokenType.DataDictionary) continue;
+
+            var langDict = new Dictionary<string, string>();
+            DataDictionary langData = langToken.DataDictionary;
+            DataList langKeys = langData.GetKeys();
+
+            for (int j = 0; j < langKeys.Count; j++)
+            {
+                string key = langKeys[j].String;
+                if (langData.TryGetValue(key, out DataToken valueToken))
+                    langDict[key] = valueToken.String;
+            }
+
+            result[lang] = langDict;
+        }
+
+        return result;
+    }
+
+    private string WriteDictionaryToJson(
+        Dictionary<string, Dictionary<string, string>> data)
+    {
+        StringBuilder sb = new StringBuilder();
+        sb.AppendLine("{");
+
+        List<string> langs = new List<string>(data.Keys);
+        langs.Sort();
+
+        for (int i = 0; i < langs.Count; i++)
+        {
+            string lang = langs[i];
+            sb.AppendLine($"    \"{EscapeJson(lang)}\": {{");
+
+            List<string> keys = new List<string>(data[lang].Keys);
+            keys.Sort();
+
+            for (int j = 0; j < keys.Count; j++)
+            {
+                string key = keys[j];
+                string value = data[lang][key];
+                string comma = j < keys.Count - 1 ? "," : "";
+                sb.AppendLine($"        \"{EscapeJson(key)}\": \"{EscapeJson(value)}\"{comma}");
+            }
+
+            string langComma = i < langs.Count - 1 ? "," : "";
+            sb.AppendLine($"    }}{langComma}");
+        }
+
+        sb.AppendLine("}");
+        return sb.ToString();
+    }
+
+    private static string EscapeJson(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return "";
+        return s
+            .Replace("\\", "\\\\")
+            .Replace("\"", "\\\"")
+            .Replace("\n", "\\n")
+            .Replace("\r", "\\r")
+            .Replace("\t", "\\t");
     }
 
     // =====================================================================
