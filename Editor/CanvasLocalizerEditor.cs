@@ -884,7 +884,7 @@ public class CanvasLocalizerEditor : Editor
             if (File.Exists(fullPath))
             {
                 string jsonContent = File.ReadAllText(fullPath, Encoding.UTF8);
-                translations = ParseJsonToDictionary(jsonContent);
+                translations = IdiomasEditorUtils.ParseJsonToDictionary(jsonContent);
                 if (translations == null)
                 {
                     // JSON corrupto: empezar de cero
@@ -1015,7 +1015,7 @@ public class CanvasLocalizerEditor : Editor
         // ============================================================
         // Escribir JSON al disco
         // ============================================================
-        string newJson = WriteDictionaryToJson(translations);
+        string newJson = IdiomasEditorUtils.WriteDictionaryToJson(translations);
         File.WriteAllText(fullPath, newJson, Encoding.UTF8);
 
         AssetDatabase.Refresh();
@@ -1289,98 +1289,4 @@ public class CanvasLocalizerEditor : Editor
         return true;
     }
 
-    // =====================================================================
-    // JSON: Leer y escribir
-    // =====================================================================
-
-    /// <summary>
-    /// Parsea el JSON de traducciones a un Dictionary anidado.
-    /// Usa VRCJson para el parseo (mismo parser que usa el runtime).
-    /// </summary>
-    private Dictionary<string, Dictionary<string, string>> ParseJsonToDictionary(string json)
-    {
-        if (!VRCJson.TryDeserializeFromJson(json, out DataToken data)) return null;
-        if (data.TokenType != TokenType.DataDictionary) return null;
-
-        var result = new Dictionary<string, Dictionary<string, string>>();
-        DataDictionary rootDict = data.DataDictionary;
-        DataList langs = rootDict.GetKeys();
-
-        for (int i = 0; i < langs.Count; i++)
-        {
-            string lang = langs[i].String;
-            if (!rootDict.TryGetValue(lang, out DataToken langToken)) continue;
-            if (langToken.TokenType != TokenType.DataDictionary) continue;
-
-            var langDict = new Dictionary<string, string>();
-            DataDictionary langData = langToken.DataDictionary;
-            DataList keys = langData.GetKeys();
-
-            for (int j = 0; j < keys.Count; j++)
-            {
-                string key = keys[j].String;
-                if (langData.TryGetValue(key, out DataToken valueToken))
-                {
-                    langDict[key] = valueToken.String;
-                }
-            }
-
-            result[lang] = langDict;
-        }
-
-        return result;
-    }
-
-    /// <summary>
-    /// Escribe el Dictionary anidado como JSON formateado con indentacion.
-    /// Mantiene las claves ordenadas alfabeticamente para diffs limpios.
-    /// </summary>
-    private string WriteDictionaryToJson(
-        Dictionary<string, Dictionary<string, string>> data)
-    {
-        StringBuilder sb = new StringBuilder();
-        sb.AppendLine("{");
-
-        // Ordenar idiomas alfabeticamente
-        List<string> langs = new List<string>(data.Keys);
-        langs.Sort();
-
-        for (int i = 0; i < langs.Count; i++)
-        {
-            string lang = langs[i];
-            sb.AppendLine($"    \"{EscapeJson(lang)}\": {{");
-
-            // Ordenar claves alfabeticamente dentro de cada idioma
-            List<string> keys = new List<string>(data[lang].Keys);
-            keys.Sort();
-
-            for (int j = 0; j < keys.Count; j++)
-            {
-                string key = keys[j];
-                string value = data[lang][key];
-                string comma = j < keys.Count - 1 ? "," : "";
-                sb.AppendLine($"        \"{EscapeJson(key)}\": \"{EscapeJson(value)}\"{comma}");
-            }
-
-            string langComma = i < langs.Count - 1 ? "," : "";
-            sb.AppendLine($"    }}{langComma}");
-        }
-
-        sb.AppendLine("}");
-        return sb.ToString();
-    }
-
-    /// <summary>
-    /// Escapa caracteres especiales para JSON.
-    /// </summary>
-    private static string EscapeJson(string s)
-    {
-        if (string.IsNullOrEmpty(s)) return "";
-        return s
-            .Replace("\\", "\\\\")
-            .Replace("\"", "\\\"")
-            .Replace("\n", "\\n")
-            .Replace("\r", "\\r")
-            .Replace("\t", "\\t");
-    }
 }

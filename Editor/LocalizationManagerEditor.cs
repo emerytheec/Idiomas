@@ -259,7 +259,7 @@ public class LocalizationManagerEditor : Editor
     private void WireDropdown(TMP_Dropdown dropdown)
     {
         LocalizationManager mgr = (LocalizationManager)target;
-        UdonBehaviour mgrUdon = FindUdonBehaviourFor(mgr);
+        UdonBehaviour mgrUdon = IdiomasEditorUtils.FindUdonBehaviourFor(mgr);
 
         if (mgrUdon == null)
         {
@@ -740,7 +740,7 @@ public class LocalizationManagerEditor : Editor
         }
 
         // Quitar el UdonBehaviour asociado (backing) y luego el componente C#
-        UdonBehaviour udon = FindUdonBehaviourFor(cl);
+        UdonBehaviour udon = IdiomasEditorUtils.FindUdonBehaviourFor(cl);
         if (udon != null) Undo.DestroyObjectImmediate(udon);
         Undo.DestroyObjectImmediate(cl);
 
@@ -883,7 +883,7 @@ public class LocalizationManagerEditor : Editor
         string jsonContent = File.ReadAllText(fullPath, Encoding.UTF8);
 
         // Parsear JSON a diccionario editable
-        var translations = ParseJsonToDictionary(jsonContent);
+        var translations = IdiomasEditorUtils.ParseJsonToDictionary(jsonContent);
         if (translations == null)
         {
             EditorUtility.DisplayDialog("Error", "No se pudo parsear el JSON.", "OK");
@@ -918,7 +918,7 @@ public class LocalizationManagerEditor : Editor
         }
 
         // Escribir JSON actualizado
-        string newJson = WriteDictionaryToJson(translations);
+        string newJson = IdiomasEditorUtils.WriteDictionaryToJson(translations);
         File.WriteAllText(fullPath, newJson, Encoding.UTF8);
         AssetDatabase.Refresh();
 
@@ -930,108 +930,6 @@ public class LocalizationManagerEditor : Editor
             $"Se eliminaron {totalRemoved} entradas del JSON\n" +
             $"({keysInJson} claves x {totalRemoved / Mathf.Max(keysInJson, 1)} idiomas).",
             "OK");
-    }
-
-    // =====================================================================
-    // Parseo y escritura de JSON (mismo patron que CanvasLocalizerEditor)
-    // =====================================================================
-
-    private Dictionary<string, Dictionary<string, string>> ParseJsonToDictionary(string json)
-    {
-        if (!VRCJson.TryDeserializeFromJson(json, out DataToken data)) return null;
-        if (data.TokenType != TokenType.DataDictionary) return null;
-
-        var result = new Dictionary<string, Dictionary<string, string>>();
-        DataDictionary rootDict = data.DataDictionary;
-        DataList langs = rootDict.GetKeys();
-
-        for (int i = 0; i < langs.Count; i++)
-        {
-            string lang = langs[i].String;
-            if (!rootDict.TryGetValue(lang, out DataToken langToken)) continue;
-            if (langToken.TokenType != TokenType.DataDictionary) continue;
-
-            var langDict = new Dictionary<string, string>();
-            DataDictionary langData = langToken.DataDictionary;
-            DataList langKeys = langData.GetKeys();
-
-            for (int j = 0; j < langKeys.Count; j++)
-            {
-                string key = langKeys[j].String;
-                if (langData.TryGetValue(key, out DataToken valueToken))
-                    langDict[key] = valueToken.String;
-            }
-
-            result[lang] = langDict;
-        }
-
-        return result;
-    }
-
-    private string WriteDictionaryToJson(
-        Dictionary<string, Dictionary<string, string>> data)
-    {
-        StringBuilder sb = new StringBuilder();
-        sb.AppendLine("{");
-
-        List<string> langs = new List<string>(data.Keys);
-        langs.Sort();
-
-        for (int i = 0; i < langs.Count; i++)
-        {
-            string lang = langs[i];
-            sb.AppendLine($"    \"{EscapeJson(lang)}\": {{");
-
-            List<string> keys = new List<string>(data[lang].Keys);
-            keys.Sort();
-
-            for (int j = 0; j < keys.Count; j++)
-            {
-                string key = keys[j];
-                string value = data[lang][key];
-                string comma = j < keys.Count - 1 ? "," : "";
-                sb.AppendLine($"        \"{EscapeJson(key)}\": \"{EscapeJson(value)}\"{comma}");
-            }
-
-            string langComma = i < langs.Count - 1 ? "," : "";
-            sb.AppendLine($"    }}{langComma}");
-        }
-
-        sb.AppendLine("}");
-        return sb.ToString();
-    }
-
-    private static string EscapeJson(string s)
-    {
-        if (string.IsNullOrEmpty(s)) return "";
-        return s
-            .Replace("\\", "\\\\")
-            .Replace("\"", "\\\"")
-            .Replace("\n", "\\n")
-            .Replace("\r", "\\r")
-            .Replace("\t", "\\t");
-    }
-
-    // =====================================================================
-    // Utilidades
-    // =====================================================================
-
-    private static UdonBehaviour FindUdonBehaviourFor(UdonSharpBehaviour proxy)
-    {
-        UdonBehaviour udon = UdonSharpEditorUtility.GetBackingUdonBehaviour(proxy);
-        if (udon != null) return udon;
-
-        SerializedObject so = new SerializedObject(proxy);
-        SerializedProperty bp = so.FindProperty("_udonSharpBackingUdonBehaviour");
-        if (bp != null && bp.objectReferenceValue != null)
-        {
-            udon = bp.objectReferenceValue as UdonBehaviour;
-            if (udon != null) return udon;
-        }
-
-        UdonBehaviour[] udons = proxy.GetComponents<UdonBehaviour>();
-        if (udons != null && udons.Length > 0) return udons[0];
-        return null;
     }
 
     private void RefreshCache()

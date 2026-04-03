@@ -419,6 +419,33 @@ public class LocalizationManager : UdonSharpBehaviour
     }
 
     /// <summary>
+    /// Llamado automaticamente por VRChat cuando el jugador cambia su idioma
+    /// en la configuracion de VRChat mientras esta en el mundo.
+    /// Re-ejecuta la deteccion de idioma y aplica los cambios.
+    /// </summary>
+    public override void OnLanguageChanged(string language)
+    {
+        if (!_initialized) return;
+
+        string resolved = ResolveLanguage(language);
+        if (string.IsNullOrEmpty(resolved))
+        {
+            // Si el nuevo idioma no esta en el JSON, re-detectar con cascada completa
+            resolved = DetectLanguage();
+        }
+
+        if (_currentLanguage == resolved) return;
+
+        _currentLanguage = resolved;
+        CacheLangDictionaries();
+        SyncDropdownToCurrentLanguage();
+
+        Debug.Log($"[LocalizationManager] Idioma cambiado por VRChat a: {resolved}");
+        ApplyToAll();
+        NotifyListeners();
+    }
+
+    /// <summary>
     /// Resuelve un codigo de idioma a uno que exista en el JSON.
     /// Maneja variantes como "es-CL" -> "es".
     /// </summary>
@@ -577,10 +604,9 @@ public class LocalizationManager : UdonSharpBehaviour
         {
             // Intentar _zero, si no existe usar _other
             pluralKey = key + "_zero";
-            string zeroResult = GetValue(pluralKey);
-            if (!zeroResult.StartsWith("["))
+            if (HasKey(pluralKey))
             {
-                return zeroResult.Replace("{n}", count.ToString());
+                return GetValue(pluralKey).Replace("{n}", count.ToString());
             }
             pluralKey = key + "_other";
         }
@@ -593,10 +619,14 @@ public class LocalizationManager : UdonSharpBehaviour
             pluralKey = key + "_other";
         }
 
-        string result = GetValue(pluralKey);
+        string result;
 
-        // Si no encontro la variante plural, intentar la clave base
-        if (result.StartsWith("["))
+        // Si la variante plural existe, usarla; si no, intentar la clave base
+        if (HasKey(pluralKey))
+        {
+            result = GetValue(pluralKey);
+        }
+        else
         {
             result = GetValue(key);
         }
@@ -691,6 +721,38 @@ public class LocalizationManager : UdonSharpBehaviour
     // =====================================================================
     // Utilidades
     // =====================================================================
+
+    /// <summary>
+    /// Verifica si una clave de traduccion existe en el idioma actual o en el fallback.
+    /// Usa los diccionarios cacheados para rendimiento.
+    /// </summary>
+    private bool HasKey(string key)
+    {
+        if (string.IsNullOrEmpty(key)) return false;
+
+        if (Utilities.IsValid(_currentLangDict) && _currentLangDict.ContainsKey(key))
+            return true;
+
+        if (Utilities.IsValid(_fallbackLangDict) && _fallbackLangDict.ContainsKey(key))
+            return true;
+
+        // Buscar en otros idiomas (sin cache, ultimo recurso)
+        for (int i = 0; i < _availableLanguages.Length; i++)
+        {
+            if (_availableLanguages[i] == _currentLanguage) continue;
+            if (_availableLanguages[i] == fallbackLanguage) continue;
+
+            if (Utilities.IsValid(_translationData) &&
+                _translationData.TryGetValue(_availableLanguages[i], out DataToken langToken) &&
+                langToken.TokenType == TokenType.DataDictionary &&
+                langToken.DataDictionary.ContainsKey(key))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>Verifica si un idioma existe en el JSON de traducciones.</summary>
     public bool HasLanguage(string language)

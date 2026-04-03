@@ -123,16 +123,10 @@ public class TextLocalizer : UdonSharpBehaviour
         // Obtener traduccion
         string translated = manager.GetValue(translationKey);
 
-        // Reemplazar parametros dinamicos {0}, {1}, {2}
-        if (!string.IsNullOrEmpty(_param0) && translated.Contains("{0}"))
-            translated = translated.Replace("{0}", _param0);
-        if (!string.IsNullOrEmpty(_param1) && translated.Contains("{1}"))
-            translated = translated.Replace("{1}", _param1);
-        if (!string.IsNullOrEmpty(_param2) && translated.Contains("{2}"))
-            translated = translated.Replace("{2}", _param2);
-
-        // Aplicar formato rich text si esta configurado
-        // Soporta {t} (recomendado) y {0} (retrocompatible) como placeholder
+        // Aplicar formato rich text si esta configurado.
+        // Se aplica ANTES de los parametros para evitar conflicto con {0}.
+        // Usar {t} como placeholder (recomendado).
+        // {0} en richTextFormat solo funciona si NO hay parametros dinamicos asignados.
         if (!string.IsNullOrEmpty(richTextFormat))
         {
             if (richTextFormat.Contains("{t}"))
@@ -140,6 +134,14 @@ public class TextLocalizer : UdonSharpBehaviour
             else if (richTextFormat.Contains("{0}") && string.IsNullOrEmpty(_param0))
                 translated = richTextFormat.Replace("{0}", translated);
         }
+
+        // Reemplazar parametros dinamicos {0}, {1}, {2} en la traduccion
+        if (!string.IsNullOrEmpty(_param0) && translated.Contains("{0}"))
+            translated = translated.Replace("{0}", _param0);
+        if (!string.IsNullOrEmpty(_param1) && translated.Contains("{1}"))
+            translated = translated.Replace("{1}", _param1);
+        if (!string.IsNullOrEmpty(_param2) && translated.Contains("{2}"))
+            translated = translated.Replace("{2}", _param2);
 
         // Aplicar prefijo y sufijo
         string final_text = string.Concat(prefix, translated, suffix);

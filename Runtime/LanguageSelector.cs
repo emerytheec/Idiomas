@@ -151,6 +151,8 @@ public class LanguageSelector : UdonSharpBehaviour
     public void _SetLanguageZhCN() { if (Utilities.IsValid(manager)) { manager.SetLanguage("zh-CN"); UpdateIndicators(); } }
     public void _SetLanguageZhTW() { if (Utilities.IsValid(manager)) { manager.SetLanguage("zh-TW"); UpdateIndicators(); } }
     public void _SetLanguagePtBR() { if (Utilities.IsValid(manager)) { manager.SetLanguage("pt-BR"); UpdateIndicators(); } }
+    public void _SetLanguageFr() { if (Utilities.IsValid(manager)) { manager.SetLanguage("fr"); UpdateIndicators(); } }
+    public void _SetLanguageDe() { if (Utilities.IsValid(manager)) { manager.SetLanguage("de"); UpdateIndicators(); } }
 
     // =====================================================================
     // Indicadores visuales

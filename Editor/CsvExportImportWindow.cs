@@ -22,7 +22,6 @@ using VRC.SDK3.Data;
 public class CsvExportImportWindow : EditorWindow
 {
     private string _jsonPath;
-    private string _csvPath;
     private string _statusMessage = "";
     private Vector2 _scrollPos;
 
@@ -191,7 +190,6 @@ public class CsvExportImportWindow : EditorWindow
 
         // Guardar
         string csvDir = Path.GetDirectoryName(_jsonPath);
-        string csvPath = Path.Combine(csvDir, "translation.csv");
 
         string savePath = EditorUtility.SaveFilePanel(
             "Guardar CSV", csvDir, "translation", "csv");
@@ -237,7 +235,7 @@ public class CsvExportImportWindow : EditorWindow
         if (!string.IsNullOrEmpty(_jsonPath) && File.Exists(_jsonPath))
         {
             string json = File.ReadAllText(_jsonPath, Encoding.UTF8);
-            translations = ParseJsonToDictionary(json);
+            translations = IdiomasEditorUtils.ParseJsonToDictionary(json);
             if (translations == null)
                 translations = new Dictionary<string, Dictionary<string, string>>();
         }
@@ -280,7 +278,7 @@ public class CsvExportImportWindow : EditorWindow
         string dir = Path.GetDirectoryName(_jsonPath);
         if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
 
-        string newJson = WriteDictionaryToJson(translations);
+        string newJson = IdiomasEditorUtils.WriteDictionaryToJson(translations);
         File.WriteAllText(_jsonPath, newJson, Encoding.UTF8);
         AssetDatabase.Refresh();
 
@@ -362,68 +360,4 @@ public class CsvExportImportWindow : EditorWindow
         return fields.ToArray();
     }
 
-    // =====================================================================
-    // JSON helpers (misma logica que CanvasLocalizerEditor)
-    // =====================================================================
-
-    private Dictionary<string, Dictionary<string, string>> ParseJsonToDictionary(string json)
-    {
-        if (!VRCJson.TryDeserializeFromJson(json, out DataToken data)) return null;
-        if (data.TokenType != TokenType.DataDictionary) return null;
-
-        var result = new Dictionary<string, Dictionary<string, string>>();
-        DataDictionary rootDict = data.DataDictionary;
-        DataList langs = rootDict.GetKeys();
-
-        for (int i = 0; i < langs.Count; i++)
-        {
-            string lang = langs[i].String;
-            if (!rootDict.TryGetValue(lang, out DataToken langToken)) continue;
-            if (langToken.TokenType != TokenType.DataDictionary) continue;
-
-            var langDict = new Dictionary<string, string>();
-            DataDictionary langData = langToken.DataDictionary;
-            DataList keys = langData.GetKeys();
-            for (int j = 0; j < keys.Count; j++)
-            {
-                string key = keys[j].String;
-                if (langData.TryGetValue(key, out DataToken val))
-                    langDict[key] = val.String;
-            }
-            result[lang] = langDict;
-        }
-        return result;
-    }
-
-    private string WriteDictionaryToJson(Dictionary<string, Dictionary<string, string>> data)
-    {
-        StringBuilder sb = new StringBuilder();
-        sb.AppendLine("{");
-        List<string> langs = new List<string>(data.Keys);
-        langs.Sort();
-
-        for (int i = 0; i < langs.Count; i++)
-        {
-            string lang = langs[i];
-            sb.AppendLine($"    \"{EscapeJson(lang)}\": {{");
-            List<string> keys = new List<string>(data[lang].Keys);
-            keys.Sort();
-            for (int j = 0; j < keys.Count; j++)
-            {
-                string comma = j < keys.Count - 1 ? "," : "";
-                sb.AppendLine($"        \"{EscapeJson(keys[j])}\": \"{EscapeJson(data[lang][keys[j]])}\"{comma}");
-            }
-            string langComma = i < langs.Count - 1 ? "," : "";
-            sb.AppendLine($"    }}{langComma}");
-        }
-        sb.AppendLine("}");
-        return sb.ToString();
-    }
-
-    private static string EscapeJson(string s)
-    {
-        if (string.IsNullOrEmpty(s)) return "";
-        return s.Replace("\\", "\\\\").Replace("\"", "\\\"")
-                .Replace("\n", "\\n").Replace("\r", "\\r").Replace("\t", "\\t");
-    }
 }

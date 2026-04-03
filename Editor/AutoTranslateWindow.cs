@@ -789,7 +789,7 @@ public class AutoTranslateWindow : EditorWindow
         }
 
         // Escribir JSON
-        string json = WriteDictionaryToJson(_translations);
+        string json = IdiomasEditorUtils.WriteDictionaryToJson(_translations);
         File.WriteAllText(_jsonPath, json, Encoding.UTF8);
         AssetDatabase.Refresh();
 
@@ -811,50 +811,4 @@ public class AutoTranslateWindow : EditorWindow
             "OK");
     }
 
-    // =====================================================================
-    // JSON writer (mismo formato que CanvasLocalizerEditor)
-    // =====================================================================
-
-    private string WriteDictionaryToJson(Dictionary<string, Dictionary<string, string>> data)
-    {
-        StringBuilder sb = new StringBuilder();
-        sb.AppendLine("{");
-
-        List<string> langs = new List<string>(data.Keys);
-        langs.Sort();
-
-        for (int i = 0; i < langs.Count; i++)
-        {
-            string lang = langs[i];
-            sb.AppendLine($"    \"{EscapeJson(lang)}\": {{");
-
-            List<string> keys = new List<string>(data[lang].Keys);
-            keys.Sort();
-
-            for (int j = 0; j < keys.Count; j++)
-            {
-                string key = keys[j];
-                string value = data[lang][key];
-                string comma = j < keys.Count - 1 ? "," : "";
-                sb.AppendLine($"        \"{EscapeJson(key)}\": \"{EscapeJson(value)}\"{comma}");
-            }
-
-            string langComma = i < langs.Count - 1 ? "," : "";
-            sb.AppendLine($"    }}{langComma}");
-        }
-
-        sb.AppendLine("}");
-        return sb.ToString();
-    }
-
-    private static string EscapeJson(string s)
-    {
-        if (string.IsNullOrEmpty(s)) return "";
-        return s
-            .Replace("\\", "\\\\")
-            .Replace("\"", "\\\"")
-            .Replace("\n", "\\n")
-            .Replace("\r", "\\r")
-            .Replace("\t", "\\t");
-    }
 }

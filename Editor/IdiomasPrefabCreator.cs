@@ -177,7 +177,7 @@ public static class IdiomasPrefabCreator
         }
 
         // Buscar el UdonBehaviour del LocalizationManager
-        UdonBehaviour mgrUdon = FindUdonBehaviourFor(_pendingManager);
+        UdonBehaviour mgrUdon = IdiomasEditorUtils.FindUdonBehaviourFor(_pendingManager);
         if (mgrUdon == null) return; // Reintentar
 
         // Encontrado!
@@ -214,24 +214,6 @@ public static class IdiomasPrefabCreator
         _pendingDropdownCanvas = null;
     }
 
-    private static UdonBehaviour FindUdonBehaviourFor(UdonSharpBehaviour proxy)
-    {
-        UdonBehaviour udon = UdonSharpEditorUtility.GetBackingUdonBehaviour(proxy);
-        if (udon != null) return udon;
-
-        SerializedObject so = new SerializedObject(proxy);
-        SerializedProperty bp = so.FindProperty("_udonSharpBackingUdonBehaviour");
-        if (bp != null && bp.objectReferenceValue != null)
-        {
-            udon = bp.objectReferenceValue as UdonBehaviour;
-            if (udon != null) return udon;
-        }
-
-        UdonBehaviour[] udons = proxy.GetComponents<UdonBehaviour>();
-        if (udons != null && udons.Length > 0) return udons[0];
-
-        return null;
-    }
 
     private static void WireEvent(TMP_Dropdown dropdown,
         UdonBehaviour udon, string eventName)

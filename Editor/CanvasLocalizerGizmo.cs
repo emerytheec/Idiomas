@@ -8,6 +8,10 @@ using UnityEngine;
 /// </summary>
 public static class CanvasLocalizerGizmo
 {
+    // GUIStyles cacheados para evitar crear nuevos cada frame
+    private static GUIStyle _selectedStyle;
+    private static GUIStyle _normalStyle;
+
     [DrawGizmo(GizmoType.Selected | GizmoType.NonSelected)]
     private static void DrawGizmo(CanvasLocalizer localizer, GizmoType gizmoType)
     {
@@ -25,15 +29,33 @@ public static class CanvasLocalizerGizmo
         // Posicion del label: encima del GameObject
         Vector3 pos = localizer.transform.position;
 
-        // Color segun estado
         bool isSelected = (gizmoType & GizmoType.Selected) != 0;
-        GUIStyle style = new GUIStyle(EditorStyles.boldLabel);
-        style.normal.textColor = isSelected
-            ? new Color(0.3f, 0.85f, 1f)
-            : new Color(0.5f, 0.75f, 1f, 0.7f);
-        style.fontSize = isSelected ? 12 : 10;
-        style.alignment = TextAnchor.MiddleCenter;
+        GUIStyle style = isSelected ? GetSelectedStyle() : GetNormalStyle();
 
         Handles.Label(pos, label, style);
+    }
+
+    private static GUIStyle GetSelectedStyle()
+    {
+        if (_selectedStyle == null)
+        {
+            _selectedStyle = new GUIStyle(EditorStyles.boldLabel);
+            _selectedStyle.normal.textColor = new Color(0.3f, 0.85f, 1f);
+            _selectedStyle.fontSize = 12;
+            _selectedStyle.alignment = TextAnchor.MiddleCenter;
+        }
+        return _selectedStyle;
+    }
+
+    private static GUIStyle GetNormalStyle()
+    {
+        if (_normalStyle == null)
+        {
+            _normalStyle = new GUIStyle(EditorStyles.boldLabel);
+            _normalStyle.normal.textColor = new Color(0.5f, 0.75f, 1f, 0.7f);
+            _normalStyle.fontSize = 10;
+            _normalStyle.alignment = TextAnchor.MiddleCenter;
+        }
+        return _normalStyle;
     }
 }
