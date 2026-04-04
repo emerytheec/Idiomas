@@ -109,6 +109,58 @@ public static class IdiomasEditorUtils
     }
 
     // =====================================================================
+    // Canvas: Normalizacion de nombres y generacion de IDs unicos
+    // =====================================================================
+
+    /// <summary>
+    /// Normaliza un nombre de GameObject para usarlo como ID o segmento de clave.
+    /// Quita sufijos de Unity (Clone, (1)), pasa a minusculas, reemplaza separadores
+    /// por underscore, y elimina caracteres no alfanumericos.
+    /// </summary>
+    public static string NormalizeName(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return "";
+        name = System.Text.RegularExpressions.Regex.Replace(name, @"\s*\(Clone\)\s*$", "");
+        name = System.Text.RegularExpressions.Regex.Replace(name, @"\s*\(\d+\)\s*$", "");
+        name = name.ToLower();
+        name = System.Text.RegularExpressions.Regex.Replace(name, @"[\s\-\.\,\;\:\+\=]+", "_");
+        name = System.Text.RegularExpressions.Regex.Replace(name, @"[^a-z0-9_]", "");
+        name = System.Text.RegularExpressions.Regex.Replace(name, @"_+", "_");
+        name = name.Trim('_');
+        return name;
+    }
+
+    /// <summary>
+    /// Genera un canvasId unico basado en el nombre del GameObject.
+    /// Verifica todos los CanvasLocalizer de la escena para evitar colisiones.
+    /// </summary>
+    public static string GenerateUniqueCanvasId(string goName, CanvasLocalizer self)
+    {
+        string baseName = NormalizeName(goName);
+        if (string.IsNullOrEmpty(baseName)) baseName = "canvas";
+
+        HashSet<string> usedIds = new HashSet<string>();
+        CanvasLocalizer[] allLocalizers = Object.FindObjectsOfType<CanvasLocalizer>(true);
+        for (int i = 0; i < allLocalizers.Length; i++)
+        {
+            if (allLocalizers[i] == self) continue;
+            string otherId = allLocalizers[i].GetCanvasId();
+            if (!string.IsNullOrEmpty(otherId))
+                usedIds.Add(otherId);
+        }
+
+        string finalId = baseName;
+        int counter = 2;
+        while (usedIds.Contains(finalId))
+        {
+            finalId = baseName + "_" + counter;
+            counter++;
+        }
+
+        return finalId;
+    }
+
+    // =====================================================================
     // UdonSharp: Busqueda de UdonBehaviour
     // =====================================================================
 

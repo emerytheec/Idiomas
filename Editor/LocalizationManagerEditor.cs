@@ -35,6 +35,7 @@ public class LocalizationManagerEditor : Editor
     private bool _showPreview = false;
     private string _previewLanguage = "en";
     private static List<CanvasSearchResult> _canvasSearchResults;
+    private int _quickSetupLangIndex = 0; // Default: "en" (indice en IdiomasLanguages.Codes)
 
     // Cache del JSON
     private DataDictionary _cachedData;
@@ -445,51 +446,6 @@ public class LocalizationManagerEditor : Editor
         return path;
     }
 
-    private static string NormalizeCanvasId(string name)
-    {
-        if (string.IsNullOrEmpty(name)) return "";
-        name = Regex.Replace(name, @"\s*\(Clone\)\s*$", "");
-        name = Regex.Replace(name, @"\s*\(\d+\)\s*$", "");
-        name = name.ToLower();
-        name = Regex.Replace(name, @"[\s\-\.\,\;\:\+\=]+", "_");
-        name = Regex.Replace(name, @"[^a-z0-9_]", "");
-        name = Regex.Replace(name, @"_+", "_");
-        name = name.Trim('_');
-        return name;
-    }
-
-    /// <summary>
-    /// Genera un canvasId unico basado en el nombre del GameObject.
-    /// Verifica todos los CanvasLocalizer de la escena para evitar colisiones.
-    /// </summary>
-    private static string GenerateUniqueCanvasId(string goName, CanvasLocalizer self)
-    {
-        string baseName = NormalizeCanvasId(goName);
-        if (string.IsNullOrEmpty(baseName)) baseName = "canvas";
-
-        // Recopilar IDs existentes de otros CanvasLocalizer en la escena
-        HashSet<string> usedIds = new HashSet<string>();
-        CanvasLocalizer[] allLocalizers = Object.FindObjectsOfType<CanvasLocalizer>(true);
-        for (int i = 0; i < allLocalizers.Length; i++)
-        {
-            if (allLocalizers[i] == self) continue;
-            string otherId = allLocalizers[i].GetCanvasId();
-            if (!string.IsNullOrEmpty(otherId))
-                usedIds.Add(otherId);
-        }
-
-        // Asegurar unicidad con sufijo numerico
-        string finalId = baseName;
-        int counter = 2;
-        while (usedIds.Contains(finalId))
-        {
-            finalId = baseName + "_" + counter;
-            counter++;
-        }
-
-        return finalId;
-    }
-
     private void DrawCanvasSearch()
     {
         EditorGUILayout.Space(3);
@@ -499,6 +455,56 @@ public class LocalizationManagerEditor : Editor
             ScanSceneForCanvas();
         }
         GUI.backgroundColor = Color.white;
+
+        // === CONFIGURACION RAPIDA ===
+        // Solo mostrar si hay resultados de escaneo con candidatos
+        if (_canvasSearchResults != null)
+        {
+            int qsCandidateCount = 0;
+            int qsCandidateTextCount = 0;
+            for (int i = 0; i < _canvasSearchResults.Count; i++)
+            {
+                if (!_canvasSearchResults[i].hasCanvasLocalizer &&
+                    _canvasSearchResults[i].tmpCount + _canvasSearchResults[i].legacyCount > 0)
+                {
+                    qsCandidateCount++;
+                    qsCandidateTextCount += _canvasSearchResults[i].tmpCount
+                        + _canvasSearchResults[i].legacyCount;
+                }
+            }
+
+            if (qsCandidateCount > 0)
+            {
+                EditorGUILayout.Space(5);
+                EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+
+                EditorGUILayout.LabelField(
+                    "Configuracion Rapida", EditorStyles.boldLabel);
+                EditorGUILayout.LabelField(
+                    $"Procesar {qsCandidateCount} canvas (~{qsCandidateTextCount} textos) de una sola vez.\n" +
+                    "Anade CanvasLocalizer, escanea textos y exporta al JSON automaticamente.\n" +
+                    "Despues puedes ajustar claves y exclusiones en cada canvas.",
+                    EditorStyles.wordWrappedMiniLabel);
+
+                EditorGUILayout.Space(3);
+                _quickSetupLangIndex = EditorGUILayout.Popup(
+                    new GUIContent("Idioma Base",
+                        "Idioma en que estan escritos los textos actuales de los canvas."),
+                    _quickSetupLangIndex, IdiomasLanguages.PopupLabelsLatin);
+
+                EditorGUILayout.Space(3);
+                GUI.backgroundColor = new Color(0.3f, 0.9f, 0.5f);
+                if (GUILayout.Button(
+                    $"Configuracion Rapida: Localizar Todo ({qsCandidateCount})",
+                    GUILayout.Height(28)))
+                {
+                    QuickSetupAll(qsCandidateCount, qsCandidateTextCount);
+                }
+                GUI.backgroundColor = Color.white;
+
+                EditorGUILayout.EndVertical();
+            }
+        }
 
         if (_canvasSearchResults == null)
         {
@@ -775,7 +781,7 @@ public class LocalizationManagerEditor : Editor
         if (mgrProp != null) mgrProp.objectReferenceValue = mgr;
 
         // Generar ID unico: normalizar nombre + verificar colisiones
-        string uniqueId = GenerateUniqueCanvasId(go.name, newCL);
+        string uniqueId = IdiomasEditorUtils.GenerateUniqueCanvasId(go.name, newCL);
         if (idProp != null) idProp.stringValue = uniqueId;
 
         clSO.ApplyModifiedProperties();
@@ -930,6 +936,211 @@ public class LocalizationManagerEditor : Editor
             $"Se eliminaron {totalRemoved} entradas del JSON\n" +
             $"({keysInJson} claves x {totalRemoved / Mathf.Max(keysInJson, 1)} idiomas).",
             "OK");
+    }
+
+    // =====================================================================
+    // Configuracion Rapida: Localizar Todo
+    // =====================================================================
+
+    private void QuickSetupAll(int candidateCount, int candidateTextCount)
+    {
+        string baseLang = IdiomasLanguages.Codes[_quickSetupLangIndex];
+        string langName = IdiomasLanguages.GetNativeName(baseLang);
+
+        if (!EditorUtility.DisplayDialog(
+            "Configuracion Rapida: Localizar Todo",
+            $"Se van a procesar {candidateCount} canvas con ~{candidateTextCount} textos.\n\n" +
+            $"Idioma base: {langName} ({baseLang})\n\n" +
+            "Para cada canvas se va a:\n" +
+            "  1. Anadir el componente CanvasLocalizer\n" +
+            "  2. Escanear todos los textos automaticamente\n" +
+            "  3. Exportar las claves al archivo JSON\n\n" +
+            "Puedes deshacer todo con Ctrl+Z.\n" +
+            "Despues podras ajustar claves y exclusiones en cada canvas.",
+            "Procesar Todo", "Cancelar"))
+        {
+            return;
+        }
+
+        LocalizationManager mgr = (LocalizationManager)target;
+
+        // ============================================================
+        // Preparar archivo JSON (leer o crear)
+        // ============================================================
+        TextAsset textAsset = _translationFile.objectReferenceValue as TextAsset;
+        string assetPath;
+        string fullPath;
+        Dictionary<string, Dictionary<string, string>> translations;
+
+        if (textAsset != null)
+        {
+            assetPath = AssetDatabase.GetAssetPath(textAsset);
+            fullPath = Path.GetFullPath(assetPath);
+            if (File.Exists(fullPath))
+            {
+                string json = File.ReadAllText(fullPath, Encoding.UTF8);
+                translations = IdiomasEditorUtils.ParseJsonToDictionary(json);
+                if (translations == null)
+                    translations = new Dictionary<string, Dictionary<string, string>>();
+            }
+            else
+            {
+                translations = new Dictionary<string, Dictionary<string, string>>();
+            }
+        }
+        else
+        {
+            assetPath = "Assets/Idiomas/Data/translation.json";
+            fullPath = Path.GetFullPath(assetPath);
+            translations = new Dictionary<string, Dictionary<string, string>>();
+            string dir = Path.GetDirectoryName(fullPath);
+            if (!Directory.Exists(dir))
+                Directory.CreateDirectory(dir);
+        }
+
+        if (!translations.ContainsKey(baseLang))
+            translations[baseLang] = new Dictionary<string, string>();
+
+        // ============================================================
+        // Fase 1: Anadir CanvasLocalizer a TODOS los candidatos
+        // (antes de escanear, para que IsUnderAny funcione correctamente
+        //  cuando un canvas padre y su hijo son ambos candidatos)
+        // ============================================================
+        List<CanvasSearchResult> toProcess = new List<CanvasSearchResult>();
+        List<CanvasLocalizer> newLocalizers = new List<CanvasLocalizer>();
+        List<string> errors = new List<string>();
+
+        for (int i = 0; i < _canvasSearchResults.Count; i++)
+        {
+            CanvasSearchResult r = _canvasSearchResults[i];
+            if (r.hasCanvasLocalizer) continue;
+            if (r.tmpCount + r.legacyCount == 0) continue;
+
+            CanvasLocalizer newCL = UdonSharpUndo.AddComponent<CanvasLocalizer>(r.gameObject);
+            if (newCL == null)
+            {
+                errors.Add($"No se pudo anadir CanvasLocalizer a '{r.gameObject.name}'");
+                continue;
+            }
+
+            // Configurar: manager + canvasId
+            SerializedObject clSO = new SerializedObject(newCL);
+            SerializedProperty mgrProp = clSO.FindProperty("manager");
+            SerializedProperty idProp = clSO.FindProperty("canvasId");
+
+            if (mgrProp != null) mgrProp.objectReferenceValue = mgr;
+            string uniqueId = IdiomasEditorUtils.GenerateUniqueCanvasId(r.gameObject.name, newCL);
+            if (idProp != null) idProp.stringValue = uniqueId;
+            clSO.ApplyModifiedProperties();
+
+            toProcess.Add(r);
+            newLocalizers.Add(newCL);
+        }
+
+        // ============================================================
+        // Fase 2: Escanear y aplicar cada canvas
+        // (ahora todos los CanvasLocalizer existen, IsUnderAny funciona)
+        // ============================================================
+        int totalTexts = 0;
+        int processedCanvas = 0;
+
+        for (int i = 0; i < toProcess.Count; i++)
+        {
+            CanvasSearchResult r = toProcess[i];
+            CanvasLocalizer cl = newLocalizers[i];
+
+            int textsConfigured = CanvasLocalizerEditor.QuickSetup(cl, baseLang, translations);
+
+            if (textsConfigured < 0)
+            {
+                errors.Add($"Error al escanear '{r.gameObject.name}'");
+            }
+            else
+            {
+                totalTexts += textsConfigured;
+                processedCanvas++;
+                r.hasCanvasLocalizer = true;
+            }
+
+            EditorUtility.SetDirty(r.gameObject);
+        }
+
+        // ============================================================
+        // Fase 3: Escribir JSON una sola vez (eficiente)
+        // ============================================================
+        if (totalTexts > 0)
+        {
+            string newJson = IdiomasEditorUtils.WriteDictionaryToJson(translations);
+            File.WriteAllText(fullPath, newJson, Encoding.UTF8);
+        }
+
+        AssetDatabase.Refresh();
+
+        // Asignar JSON al manager si no tenia uno
+        if (textAsset == null && totalTexts > 0)
+        {
+            TextAsset newAsset = AssetDatabase.LoadAssetAtPath<TextAsset>(assetPath);
+            if (newAsset != null)
+            {
+                _translationFile.objectReferenceValue = newAsset;
+                serializedObject.ApplyModifiedProperties();
+            }
+        }
+
+        // ============================================================
+        // Fase 4: Registrar todos los CanvasLocalizer con el manager
+        // ============================================================
+        SerializedObject mgrSO = new SerializedObject(mgr);
+        SerializedProperty clArray = mgrSO.FindProperty("canvasLocalizers");
+
+        // Construir set de ya registrados para busqueda rapida
+        HashSet<Object> registered = new HashSet<Object>();
+        for (int i = 0; i < clArray.arraySize; i++)
+        {
+            Object obj = clArray.GetArrayElementAtIndex(i).objectReferenceValue;
+            if (obj != null) registered.Add(obj);
+        }
+
+        // Agregar los nuevos
+        for (int i = 0; i < newLocalizers.Count; i++)
+        {
+            if (newLocalizers[i] != null && !registered.Contains(newLocalizers[i]))
+            {
+                int idx = clArray.arraySize;
+                clArray.arraySize = idx + 1;
+                clArray.GetArrayElementAtIndex(idx).objectReferenceValue = newLocalizers[i];
+            }
+        }
+        mgrSO.ApplyModifiedProperties();
+
+        // Invalidar cache del JSON para que las estadisticas se actualicen
+        _cachedJsonHash = null;
+
+        // ============================================================
+        // Mostrar resumen
+        // ============================================================
+        StringBuilder summary = new StringBuilder();
+        summary.AppendLine($"Canvas procesados: {processedCanvas}/{candidateCount}");
+        summary.AppendLine($"Textos configurados: {totalTexts}");
+        summary.AppendLine($"Idioma base: {langName} ({baseLang})");
+        summary.AppendLine($"Archivo: {assetPath}");
+
+        if (errors.Count > 0)
+        {
+            summary.AppendLine($"\nErrores ({errors.Count}):");
+            for (int i = 0; i < errors.Count; i++)
+                summary.AppendLine($"  - {errors[i]}");
+        }
+
+        summary.AppendLine("\nPuedes ir a cada CanvasLocalizer para ajustar" +
+            "\nclaves, exclusiones, o re-escanear si es necesario.");
+
+        EditorUtility.DisplayDialog(
+            "Configuracion Rapida Completada",
+            summary.ToString(), "OK");
+
+        Debug.Log($"[Idiomas] Configuracion Rapida: {processedCanvas} canvas, " +
+            $"{totalTexts} textos. Idioma base: {baseLang}");
     }
 
     private void RefreshCache()

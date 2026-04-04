@@ -6,7 +6,6 @@ using System.IO;
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
-using VRC.SDK3.Data;
 
 /// <summary>
 /// Ventana de Editor para auto-traducir las claves faltantes del JSON de traducciones.
@@ -111,38 +110,21 @@ public class AutoTranslateWindow : EditorWindow
         }
 
         string json = File.ReadAllText(_jsonPath, Encoding.UTF8);
-        if (!VRCJson.TryDeserializeFromJson(json, out DataToken data) ||
-            data.TokenType != TokenType.DataDictionary)
+        _translations = IdiomasEditorUtils.ParseJsonToDictionary(json);
+
+        if (_translations == null)
         {
-            _translations = null;
             _statusMessage = "Error al parsear el JSON.";
             return;
         }
 
-        // Parsear a Dictionary
-        _translations = new Dictionary<string, Dictionary<string, string>>();
-        DataDictionary root = data.DataDictionary;
-        DataList langs = root.GetKeys();
-
-        for (int i = 0; i < langs.Count; i++)
+        // Recolectar todas las claves de todos los idiomas
+        foreach (var langPair in _translations)
         {
-            string lang = langs[i].String;
-            if (!root.TryGetValue(lang, out DataToken langToken)) continue;
-            if (langToken.TokenType != TokenType.DataDictionary) continue;
-
-            var dict = new Dictionary<string, string>();
-            DataDictionary langData = langToken.DataDictionary;
-            DataList keys = langData.GetKeys();
-            for (int j = 0; j < keys.Count; j++)
+            foreach (string key in langPair.Value.Keys)
             {
-                string key = keys[j].String;
-                if (langData.TryGetValue(key, out DataToken val))
-                {
-                    dict[key] = val.String;
-                    _allKeys.Add(key);
-                }
+                _allKeys.Add(key);
             }
-            _translations[lang] = dict;
         }
 
         // Marcar idiomas que tienen claves faltantes

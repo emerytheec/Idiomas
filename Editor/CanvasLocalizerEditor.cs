@@ -111,31 +111,7 @@ public class CanvasLocalizerEditor : Editor
         CanvasLocalizer cl = target as CanvasLocalizer;
         if (cl == null) return;
 
-        // Generar ID base desde el nombre del GameObject
-        string baseName = NormalizeName(cl.gameObject.name);
-        if (string.IsNullOrEmpty(baseName)) baseName = "canvas";
-
-        // Recopilar IDs existentes de otros CanvasLocalizer en la escena
-        HashSet<string> usedIds = new HashSet<string>();
-        CanvasLocalizer[] allLocalizers = Object.FindObjectsOfType<CanvasLocalizer>(true);
-        for (int i = 0; i < allLocalizers.Length; i++)
-        {
-            if (allLocalizers[i] == cl) continue;
-            string otherId = allLocalizers[i].GetCanvasId();
-            if (!string.IsNullOrEmpty(otherId))
-                usedIds.Add(otherId);
-        }
-
-        // Asegurar unicidad
-        string finalId = baseName;
-        int counter = 2;
-        while (usedIds.Contains(finalId))
-        {
-            finalId = baseName + "_" + counter;
-            counter++;
-        }
-
-        _canvasId.stringValue = finalId;
+        _canvasId.stringValue = IdiomasEditorUtils.GenerateUniqueCanvasId(cl.gameObject.name, cl);
         serializedObject.ApplyModifiedProperties();
     }
 
@@ -1191,7 +1167,7 @@ public class CanvasLocalizerEditor : Editor
         // Normalizar cada segmento
         for (int i = 0; i < segments.Count; i++)
         {
-            segments[i] = NormalizeName(segments[i]);
+            segments[i] = IdiomasEditorUtils.NormalizeName(segments[i]);
         }
 
         // Quitar segmentos vacios
@@ -1221,39 +1197,6 @@ public class CanvasLocalizerEditor : Editor
     }
 
     /// <summary>
-    /// Normaliza un nombre de GameObject para usarlo como segmento de clave:
-    /// - Quita "(Clone)", "(N)" al final
-    /// - Convierte a minusculas
-    /// - Reemplaza espacios/guiones/puntos por _
-    /// - Quita caracteres no alfanumericos
-    /// - Colapsa underscores multiples
-    /// </summary>
-    private static string NormalizeName(string name)
-    {
-        if (string.IsNullOrEmpty(name)) return "";
-
-        // Quitar sufijos de Unity
-        name = Regex.Replace(name, @"\s*\(Clone\)\s*$", "");
-        name = Regex.Replace(name, @"\s*\(\d+\)\s*$", "");
-
-        // Minusculas
-        name = name.ToLower();
-
-        // Reemplazar separadores comunes
-        name = Regex.Replace(name, @"[\s\-\.\,\;\:\+\=]+", "_");
-
-        // Quitar todo excepto letras, numeros, underscore
-        name = Regex.Replace(name, @"[^a-z0-9_]", "");
-
-        // Colapsar underscores
-        name = Regex.Replace(name, @"_+", "_");
-
-        // Trim
-        name = name.Trim('_');
-
-        return name;
-    }
-
     /// <summary>
     /// Obtiene la ruta relativa desde root hasta child como "Padre/Hijo/Nieto".
     /// </summary>
@@ -1287,6 +1230,185 @@ public class CanvasLocalizerEditor : Editor
         }
 
         return true;
+    }
+
+    // =====================================================================
+    // Configuracion Rapida (API estatica para uso externo)
+    // =====================================================================
+
+    /// <summary>
+    /// Escanea un canvas y aplica los resultados a sus arrays serializados.
+    /// Agrega las claves encontradas al diccionario de traducciones (sin escribir a disco).
+    /// No registra el CanvasLocalizer con el manager (el llamador lo hace).
+    ///
+    /// Usado por LocalizationManagerEditor para procesamiento masivo.
+    /// El CanvasLocalizer debe tener canvasId y manager ya asignados.
+    /// </summary>
+    /// <param name="cl">CanvasLocalizer ya configurado.</param>
+    /// <param name="baseLang">Codigo del idioma base (ej: "es").</param>
+    /// <param name="translations">Diccionario de traducciones donde agregar claves nuevas.</param>
+    /// <returns>Numero de textos configurados, o -1 si hubo error.</returns>
+    public static int QuickSetup(CanvasLocalizer cl, string baseLang,
+        Dictionary<string, Dictionary<string, string>> translations)
+    {
+        if (cl == null) return -1;
+
+        SerializedObject clSO = new SerializedObject(cl);
+        string canvasId = clSO.FindProperty("canvasId").stringValue;
+        if (string.IsNullOrEmpty(canvasId)) return -1;
+
+        // Asignar idioma base
+        clSO.FindProperty("baseLanguage").stringValue = baseLang;
+        clSO.ApplyModifiedProperties();
+
+        // Asegurar que el idioma base existe en el diccionario
+        if (!translations.ContainsKey(baseLang))
+            translations[baseLang] = new Dictionary<string, string>();
+
+        Transform root = cl.transform;
+
+        // Buscar otros CanvasLocalizer hijos para no robar sus textos
+        HashSet<Transform> childCanvasRoots = new HashSet<Transform>();
+        CanvasLocalizer[] childCLs = root.GetComponentsInChildren<CanvasLocalizer>(true);
+        for (int i = 0; i < childCLs.Length; i++)
+        {
+            if (childCLs[i] != cl)
+                childCanvasRoots.Add(childCLs[i].transform);
+        }
+
+        // Listas para los resultados
+        List<TextMeshProUGUI> tmpList = new List<TextMeshProUGUI>();
+        List<string> tmpKeyList = new List<string>();
+        List<Text> legacyList = new List<Text>();
+        List<string> legacyKeyList = new List<string>();
+        HashSet<string> usedKeys = new HashSet<string>();
+
+        // --- Escanear TextMeshProUGUI ---
+        TextMeshProUGUI[] tmps = root.GetComponentsInChildren<TextMeshProUGUI>(true);
+        for (int i = 0; i < tmps.Length; i++)
+        {
+            TextMeshProUGUI tmp = tmps[i];
+            if (QuickSetup_IsUnderAny(tmp.transform, childCanvasRoots, root)) continue;
+            if (tmp.GetComponent<TextLocalizer>() != null) continue;
+            string text = tmp.text;
+            if (string.IsNullOrEmpty(text) || string.IsNullOrWhiteSpace(text)) continue;
+            if (IsNonTranslatable(text)) continue;
+
+            string key = QuickSetup_GenerateKey(root, tmp.transform, canvasId, usedKeys);
+            usedKeys.Add(key);
+            tmpList.Add(tmp);
+            tmpKeyList.Add(key);
+
+            // Agregar al diccionario si la clave no existe
+            if (!translations[baseLang].ContainsKey(key))
+                translations[baseLang][key] = text;
+        }
+
+        // --- Escanear Text (legacy) ---
+        Text[] legacyTextsArr = root.GetComponentsInChildren<Text>(true);
+        for (int i = 0; i < legacyTextsArr.Length; i++)
+        {
+            Text txt = legacyTextsArr[i];
+            if (QuickSetup_IsUnderAny(txt.transform, childCanvasRoots, root)) continue;
+            if (txt.GetComponent<TextLocalizer>() != null) continue;
+            string text = txt.text;
+            if (string.IsNullOrEmpty(text) || string.IsNullOrWhiteSpace(text)) continue;
+            if (IsNonTranslatable(text)) continue;
+
+            string key = QuickSetup_GenerateKey(root, txt.transform, canvasId, usedKeys);
+            usedKeys.Add(key);
+            legacyList.Add(txt);
+            legacyKeyList.Add(key);
+
+            if (!translations[baseLang].ContainsKey(key))
+                translations[baseLang][key] = text;
+        }
+
+        int totalTexts = tmpList.Count + legacyList.Count;
+        if (totalTexts == 0) return 0;
+
+        // === Aplicar a los arrays serializados ===
+        clSO = new SerializedObject(cl);
+        SerializedProperty tmpTextsProp = clSO.FindProperty("tmpTexts");
+        SerializedProperty tmpKeysProp = clSO.FindProperty("tmpKeys");
+        SerializedProperty legacyTextsProp = clSO.FindProperty("legacyTexts");
+        SerializedProperty legacyKeysProp = clSO.FindProperty("legacyKeys");
+
+        tmpTextsProp.arraySize = tmpList.Count;
+        tmpKeysProp.arraySize = tmpKeyList.Count;
+        for (int i = 0; i < tmpList.Count; i++)
+        {
+            tmpTextsProp.GetArrayElementAtIndex(i).objectReferenceValue = tmpList[i];
+            tmpKeysProp.GetArrayElementAtIndex(i).stringValue = tmpKeyList[i];
+        }
+
+        legacyTextsProp.arraySize = legacyList.Count;
+        legacyKeysProp.arraySize = legacyKeyList.Count;
+        for (int i = 0; i < legacyList.Count; i++)
+        {
+            legacyTextsProp.GetArrayElementAtIndex(i).objectReferenceValue = legacyList[i];
+            legacyKeysProp.GetArrayElementAtIndex(i).stringValue = legacyKeyList[i];
+        }
+
+        clSO.ApplyModifiedProperties();
+        return totalTexts;
+    }
+
+    /// <summary>
+    /// Verifica si un Transform esta bajo alguno de los roots dados.
+    /// Version estatica para QuickSetup.
+    /// </summary>
+    private static bool QuickSetup_IsUnderAny(Transform t, HashSet<Transform> roots, Transform ownRoot)
+    {
+        Transform current = t;
+        while (current != null && current != ownRoot)
+        {
+            if (roots.Contains(current)) return true;
+            current = current.parent;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Genera una clave de traduccion desde la jerarquia.
+    /// Version estatica para QuickSetup.
+    /// </summary>
+    private static string QuickSetup_GenerateKey(Transform root, Transform textTransform,
+        string canvasId, HashSet<string> usedKeys)
+    {
+        List<string> segments = new List<string>();
+        Transform current = textTransform;
+        while (current != null && current != root)
+        {
+            segments.Insert(0, current.name);
+            current = current.parent;
+        }
+
+        if (segments.Count > 1)
+        {
+            string lastName = segments[segments.Count - 1].ToLower().Trim();
+            if (GENERIC_NAMES.Contains(lastName))
+                segments.RemoveAt(segments.Count - 1);
+        }
+
+        for (int i = 0; i < segments.Count; i++)
+            segments[i] = IdiomasEditorUtils.NormalizeName(segments[i]);
+
+        segments.RemoveAll(s => string.IsNullOrEmpty(s));
+
+        string key = segments.Count == 0
+            ? canvasId + "_text"
+            : canvasId + "_" + string.Join("_", segments);
+
+        string baseKey = key;
+        int counter = 2;
+        while (usedKeys.Contains(key))
+        {
+            key = baseKey + "_" + counter;
+            counter++;
+        }
+
+        return key;
     }
 
 }
