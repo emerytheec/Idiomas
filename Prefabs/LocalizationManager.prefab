@@ -1462,10 +1462,26 @@ MonoBehaviour:
     PrefabModifications: []
     SerializationNodes: []
   _udonSharpBackingUdonBehaviour: {fileID: 5849519450907936438}
-  translationFile: {fileID: 0}
+  translationFile: {fileID: 4900000, guid: 3b673c33c6b520740a0a4ff3bf5cee4c, type: 3}
   fallbackLanguage: en
   localizers: []
   canvasLocalizers:
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
   - {fileID: 0}
   _languageDropdown: {fileID: 8207155395141436227}
   _dropdownLanguageCodes:
@@ -1481,9 +1497,7 @@ MonoBehaviour:
   - fr
   - de
   - ca
-  currentLanguage: 
-  languageCount: 0
-  isReady: 0
+  _listeners: []
 --- !u!114 &5849519450907936438
 MonoBehaviour:
   m_ObjectHideFlags: 0
