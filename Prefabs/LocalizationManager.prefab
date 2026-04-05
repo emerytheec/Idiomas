@@ -1462,7 +1462,7 @@ MonoBehaviour:
     PrefabModifications: []
     SerializationNodes: []
   _udonSharpBackingUdonBehaviour: {fileID: 5849519450907936438}
-  translationFile: {fileID: 4900000, guid: 3b673c33c6b520740a0a4ff3bf5cee4c, type: 3}
+  translationFile: {fileID: 0}
   fallbackLanguage: en
   localizers: []
   canvasLocalizers:
