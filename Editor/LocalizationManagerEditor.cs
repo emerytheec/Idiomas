@@ -637,7 +637,34 @@ public class LocalizationManagerEditor : Editor
             if (!hasLocalized)
             {
                 EditorGUILayout.Space(5);
-                EditorGUILayout.LabelField("Ya localizados:", EditorStyles.boldLabel);
+
+                // Titulo + botones globales
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField("Ya localizados:", EditorStyles.boldLabel, GUILayout.ExpandWidth(false));
+                GUILayout.FlexibleSpace();
+
+                // Boton global: Restaurar JSON Faltantes
+                GUI.backgroundColor = new Color(0.3f, 0.8f, 0.5f);
+                if (GUILayout.Button(new GUIContent("Restaurar JSON Faltantes",
+                    "Re-exporta al JSON las claves faltantes de TODOS los CanvasLocalizer."),
+                    GUILayout.Width(160)))
+                {
+                    RestoreAllKeysToJson();
+                }
+                GUI.backgroundColor = Color.white;
+
+                // Boton global: Quitar Todos los CanvasLocalizer
+                GUI.backgroundColor = new Color(1f, 0.4f, 0.4f);
+                if (GUILayout.Button(new GUIContent("Quitar Todos",
+                    "Elimina el componente CanvasLocalizer de TODOS los canvas y limpia sus claves del JSON."),
+                    GUILayout.Width(100)))
+                {
+                    RemoveAllCanvasLocalizers();
+                }
+                GUI.backgroundColor = Color.white;
+
+                EditorGUILayout.EndHorizontal();
+
                 hasLocalized = true;
             }
 
@@ -697,6 +724,17 @@ public class LocalizationManagerEditor : Editor
             // Linea 2: botones alineados a la derecha
             EditorGUILayout.BeginHorizontal();
             GUILayout.FlexibleSpace();
+
+            // Boton para restaurar claves faltantes al JSON
+            int missingKeys = totalKeys - keysInJson;
+            EditorGUI.BeginDisabledGroup(missingKeys == 0);
+            GUI.backgroundColor = new Color(0.3f, 0.8f, 0.5f);
+            if (GUILayout.Button($"Restaurar JSON ({missingKeys})", GUILayout.Width(140)))
+            {
+                RestoreKeysToJson(cl, clKeys);
+            }
+            GUI.backgroundColor = Color.white;
+            EditorGUI.EndDisabledGroup();
 
             // Boton para limpiar claves del JSON
             EditorGUI.BeginDisabledGroup(keysInJson == 0);
@@ -982,6 +1020,340 @@ public class LocalizationManagerEditor : Editor
         EditorUtility.DisplayDialog("Listo",
             $"Se eliminaron {totalRemoved} entradas del JSON\n" +
             $"({keysInJson} claves x {totalRemoved / Mathf.Max(keysInJson, 1)} idiomas).",
+            "OK");
+    }
+
+    // =====================================================================
+    // Restaurar claves faltantes al JSON
+    // =====================================================================
+
+    /// <summary>
+    /// Restaura al JSON las claves de un CanvasLocalizer que faltan.
+    /// Lee el texto actual de los componentes referenciados y lo escribe
+    /// bajo el baseLanguage del canvas. No sobreescribe claves existentes.
+    /// </summary>
+    private void RestoreKeysToJson(CanvasLocalizer cl, List<string> allKeys)
+    {
+        if (cl == null || allKeys.Count == 0) return;
+
+        TextAsset ta = _translationFile.objectReferenceValue as TextAsset;
+        if (ta == null)
+        {
+            EditorUtility.DisplayDialog("Sin Archivo",
+                "No hay archivo de traducciones asignado.", "OK");
+            return;
+        }
+
+        string baseLang = cl.GetBaseLanguage();
+        if (string.IsNullOrEmpty(baseLang))
+        {
+            EditorUtility.DisplayDialog("Sin Idioma Base",
+                "El CanvasLocalizer no tiene idioma base configurado.", "OK");
+            return;
+        }
+
+        string assetPath = AssetDatabase.GetAssetPath(ta);
+        string fullPath = Path.GetFullPath(assetPath);
+        string jsonContent = File.ReadAllText(fullPath, Encoding.UTF8);
+
+        var translations = IdiomasEditorUtils.ParseJsonToDictionary(jsonContent);
+        if (translations == null)
+        {
+            EditorUtility.DisplayDialog("Error", "No se pudo parsear el JSON.", "OK");
+            return;
+        }
+
+        if (!translations.ContainsKey(baseLang))
+            translations[baseLang] = new Dictionary<string, string>();
+
+        // Construir mapa clave -> texto actual desde los arrays del CanvasLocalizer
+        Dictionary<string, string> keyTextMap = BuildKeyTextMap(cl);
+
+        // Agregar solo las claves que faltan
+        int added = 0;
+        for (int i = 0; i < allKeys.Count; i++)
+        {
+            string key = allKeys[i];
+            if (translations[baseLang].ContainsKey(key)) continue;
+            if (!keyTextMap.ContainsKey(key)) continue;
+
+            translations[baseLang][key] = keyTextMap[key];
+            added++;
+        }
+
+        if (added == 0)
+        {
+            EditorUtility.DisplayDialog("Sin Cambios",
+                "Todas las claves ya existen en el JSON.", "OK");
+            return;
+        }
+
+        // Escribir JSON actualizado
+        string newJson = IdiomasEditorUtils.WriteDictionaryToJson(translations);
+        File.WriteAllText(fullPath, newJson, Encoding.UTF8);
+        AssetDatabase.Refresh();
+
+        _cachedJsonHash = null;
+
+        string canvasId = cl.GetCanvasId();
+        Debug.Log($"[Idiomas] Restauradas {added} claves al JSON (canvas \"{canvasId}\", idioma \"{baseLang}\").");
+        EditorUtility.DisplayDialog("Listo",
+            $"Se restauraron {added} clave(s) al JSON\n" +
+            $"bajo el idioma \"{baseLang}\" (canvas \"{canvasId}\").",
+            "OK");
+    }
+
+    /// <summary>
+    /// Construye un mapa clave -> texto actual leyendo los arrays serializados
+    /// de un CanvasLocalizer y el texto de cada componente referenciado.
+    /// </summary>
+    private Dictionary<string, string> BuildKeyTextMap(CanvasLocalizer cl)
+    {
+        Dictionary<string, string> map = new Dictionary<string, string>();
+        SerializedObject clSO = new SerializedObject(cl);
+
+        SerializedProperty tmpTexts = clSO.FindProperty("tmpTexts");
+        SerializedProperty tmpKeys = clSO.FindProperty("tmpKeys");
+        if (tmpTexts != null && tmpKeys != null)
+        {
+            int count = Mathf.Min(tmpTexts.arraySize, tmpKeys.arraySize);
+            for (int i = 0; i < count; i++)
+            {
+                string key = tmpKeys.GetArrayElementAtIndex(i).stringValue;
+                TextMeshProUGUI comp = tmpTexts.GetArrayElementAtIndex(i).objectReferenceValue as TextMeshProUGUI;
+                if (!string.IsNullOrEmpty(key) && comp != null && !string.IsNullOrEmpty(comp.text))
+                    map[key] = comp.text;
+            }
+        }
+
+        SerializedProperty legTexts = clSO.FindProperty("legacyTexts");
+        SerializedProperty legKeys = clSO.FindProperty("legacyKeys");
+        if (legTexts != null && legKeys != null)
+        {
+            int count = Mathf.Min(legTexts.arraySize, legKeys.arraySize);
+            for (int i = 0; i < count; i++)
+            {
+                string key = legKeys.GetArrayElementAtIndex(i).stringValue;
+                Text comp = legTexts.GetArrayElementAtIndex(i).objectReferenceValue as Text;
+                if (!string.IsNullOrEmpty(key) && comp != null && !string.IsNullOrEmpty(comp.text))
+                    map[key] = comp.text;
+            }
+        }
+
+        return map;
+    }
+
+    // =====================================================================
+    // Restaurar JSON Faltantes (global - todos los CanvasLocalizer)
+    // =====================================================================
+
+    /// <summary>
+    /// Restaura al JSON las claves faltantes de TODOS los CanvasLocalizer de la escena.
+    /// Solo agrega claves que no existan; no sobreescribe las existentes.
+    /// </summary>
+    private void RestoreAllKeysToJson()
+    {
+        TextAsset ta = _translationFile.objectReferenceValue as TextAsset;
+        if (ta == null)
+        {
+            EditorUtility.DisplayDialog("Sin Archivo",
+                "No hay archivo de traducciones asignado.", "OK");
+            return;
+        }
+
+        // Recopilar todos los CanvasLocalizer registrados
+        List<CanvasLocalizer> localizers = new List<CanvasLocalizer>();
+        for (int i = 0; i < _canvasLocalizers.arraySize; i++)
+        {
+            CanvasLocalizer cl = _canvasLocalizers.GetArrayElementAtIndex(i).objectReferenceValue as CanvasLocalizer;
+            if (cl != null) localizers.Add(cl);
+        }
+
+        if (localizers.Count == 0)
+        {
+            EditorUtility.DisplayDialog("Sin CanvasLocalizer",
+                "No hay CanvasLocalizer registrados.", "OK");
+            return;
+        }
+
+        string assetPath = AssetDatabase.GetAssetPath(ta);
+        string fullPath = Path.GetFullPath(assetPath);
+        string jsonContent = File.ReadAllText(fullPath, Encoding.UTF8);
+
+        var translations = IdiomasEditorUtils.ParseJsonToDictionary(jsonContent);
+        if (translations == null)
+        {
+            EditorUtility.DisplayDialog("Error", "No se pudo parsear el JSON.", "OK");
+            return;
+        }
+
+        int totalAdded = 0;
+        int canvasProcessed = 0;
+
+        for (int c = 0; c < localizers.Count; c++)
+        {
+            CanvasLocalizer cl = localizers[c];
+            string baseLang = cl.GetBaseLanguage();
+            if (string.IsNullOrEmpty(baseLang)) continue;
+
+            if (!translations.ContainsKey(baseLang))
+                translations[baseLang] = new Dictionary<string, string>();
+
+            List<string> clKeys = GetCanvasLocalizerKeys(cl);
+            Dictionary<string, string> keyTextMap = BuildKeyTextMap(cl);
+
+            int added = 0;
+            for (int i = 0; i < clKeys.Count; i++)
+            {
+                string key = clKeys[i];
+                if (translations[baseLang].ContainsKey(key)) continue;
+                if (!keyTextMap.ContainsKey(key)) continue;
+
+                translations[baseLang][key] = keyTextMap[key];
+                added++;
+            }
+
+            if (added > 0) canvasProcessed++;
+            totalAdded += added;
+        }
+
+        if (totalAdded == 0)
+        {
+            EditorUtility.DisplayDialog("Sin Cambios",
+                "Todas las claves de todos los CanvasLocalizer ya existen en el JSON.", "OK");
+            return;
+        }
+
+        string newJson = IdiomasEditorUtils.WriteDictionaryToJson(translations);
+        File.WriteAllText(fullPath, newJson, Encoding.UTF8);
+        AssetDatabase.Refresh();
+
+        _cachedJsonHash = null;
+
+        Debug.Log($"[Idiomas] Restauracion global: {totalAdded} claves de {canvasProcessed} canvas.");
+        EditorUtility.DisplayDialog("Restauracion Completada",
+            $"Se restauraron {totalAdded} clave(s) al JSON\n" +
+            $"desde {canvasProcessed} canvas de {localizers.Count} total.",
+            "OK");
+    }
+
+    // =====================================================================
+    // Quitar Todos los CanvasLocalizer (global)
+    // =====================================================================
+
+    /// <summary>
+    /// Elimina el componente CanvasLocalizer de TODOS los canvas de la escena
+    /// y limpia sus claves del JSON.
+    /// </summary>
+    private void RemoveAllCanvasLocalizers()
+    {
+        // Recopilar todos los CanvasLocalizer registrados
+        List<CanvasLocalizer> localizers = new List<CanvasLocalizer>();
+        for (int i = 0; i < _canvasLocalizers.arraySize; i++)
+        {
+            CanvasLocalizer cl = _canvasLocalizers.GetArrayElementAtIndex(i).objectReferenceValue as CanvasLocalizer;
+            if (cl != null) localizers.Add(cl);
+        }
+
+        if (localizers.Count == 0)
+        {
+            EditorUtility.DisplayDialog("Sin CanvasLocalizer",
+                "No hay CanvasLocalizer registrados.", "OK");
+            return;
+        }
+
+        // Contar claves totales en JSON para el dialogo
+        int totalKeysInJson = 0;
+        List<List<string>> allKeyLists = new List<List<string>>();
+        for (int i = 0; i < localizers.Count; i++)
+        {
+            List<string> keys = GetCanvasLocalizerKeys(localizers[i]);
+            allKeyLists.Add(keys);
+            totalKeysInJson += CountKeysInJson(keys);
+        }
+
+        string msg = $"Quitar CanvasLocalizer de {localizers.Count} canvas?\n\n";
+        if (totalKeysInJson > 0)
+            msg += $"Se eliminaran {totalKeysInJson} clave(s) del JSON.\n\n";
+        msg += "Puedes deshacerlo con Ctrl+Z (componentes).\n" +
+               "Las claves eliminadas del JSON NO se pueden deshacer con Ctrl+Z.";
+
+        if (!EditorUtility.DisplayDialog("Quitar Todos los CanvasLocalizer", msg, "Quitar Todos", "Cancelar"))
+            return;
+
+        // Fase 1: Limpiar claves del JSON
+        if (totalKeysInJson > 0)
+        {
+            TextAsset ta = _translationFile.objectReferenceValue as TextAsset;
+            if (ta != null)
+            {
+                string assetPath = AssetDatabase.GetAssetPath(ta);
+                string fullPath = Path.GetFullPath(assetPath);
+                string jsonContent = File.ReadAllText(fullPath, Encoding.UTF8);
+
+                var translations = IdiomasEditorUtils.ParseJsonToDictionary(jsonContent);
+                if (translations != null)
+                {
+                    // Reunir todas las claves a eliminar
+                    HashSet<string> keysToRemove = new HashSet<string>();
+                    for (int i = 0; i < allKeyLists.Count; i++)
+                    {
+                        for (int j = 0; j < allKeyLists[i].Count; j++)
+                            keysToRemove.Add(allKeyLists[i][j]);
+                    }
+
+                    // Eliminar de todos los idiomas
+                    foreach (var langPair in translations)
+                    {
+                        List<string> toRemove = new List<string>();
+                        foreach (string key in langPair.Value.Keys)
+                        {
+                            if (keysToRemove.Contains(key))
+                                toRemove.Add(key);
+                        }
+                        for (int i = 0; i < toRemove.Count; i++)
+                            langPair.Value.Remove(toRemove[i]);
+                    }
+
+                    string newJson = IdiomasEditorUtils.WriteDictionaryToJson(translations);
+                    File.WriteAllText(fullPath, newJson, Encoding.UTF8);
+                    AssetDatabase.Refresh();
+                    _cachedJsonHash = null;
+                }
+            }
+        }
+
+        // Fase 2: Eliminar componentes CanvasLocalizer y UdonBehaviour
+        int removed = 0;
+        for (int i = 0; i < localizers.Count; i++)
+        {
+            CanvasLocalizer cl = localizers[i];
+            if (cl == null) continue;
+
+            GameObject go = cl.gameObject;
+            UdonBehaviour udon = IdiomasEditorUtils.FindUdonBehaviourFor(cl);
+            if (udon != null) Undo.DestroyObjectImmediate(udon);
+            Undo.DestroyObjectImmediate(cl);
+
+            EditorUtility.SetDirty(go);
+            removed++;
+        }
+
+        // Fase 3: Limpiar el array canvasLocalizers del manager
+        _canvasLocalizers.ClearArray();
+        serializedObject.ApplyModifiedProperties();
+
+        // Actualizar resultados de escaneo si existen
+        if (_canvasSearchResults != null)
+        {
+            for (int i = 0; i < _canvasSearchResults.Count; i++)
+                _canvasSearchResults[i].hasCanvasLocalizer = false;
+        }
+
+        Debug.Log($"[Idiomas] Eliminados {removed} CanvasLocalizer y {totalKeysInJson} claves del JSON.");
+        EditorUtility.DisplayDialog("Completado",
+            $"Se eliminaron {removed} CanvasLocalizer\n" +
+            $"y {totalKeysInJson} clave(s) del JSON.",
             "OK");
     }
 
