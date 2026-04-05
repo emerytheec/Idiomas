@@ -62,14 +62,14 @@ public static class IdiomasPrefabCreator
     public static void CreateLanguageSelector()
     {
         // Buscar o crear LocalizationManager
-        LocalizationManager manager = Object.FindObjectOfType<LocalizationManager>();
+        LocalizationManager manager = Object.FindFirstObjectByType<LocalizationManager>();
         bool createdManager = false;
 
         if (manager == null)
         {
             GameObject mgrGO = new GameObject("LocalizationManager");
             Undo.RegisterCreatedObjectUndo(mgrGO, "Crear LocalizationManager");
-            manager = mgrGO.AddComponent<LocalizationManager>();
+            manager = UdonSharpUndo.AddComponent<LocalizationManager>(mgrGO);
             TextAsset tf = FindTranslationFile();
             if (tf != null) SetField(manager, "translationFile", tf);
             createdManager = true;
@@ -103,7 +103,7 @@ public static class IdiomasPrefabCreator
     [MenuItem("GameObject/Idiomas/Crear Canvas de Ejemplo", false, 11)]
     public static void CreateDemoExample()
     {
-        LocalizationManager manager = Object.FindObjectOfType<LocalizationManager>();
+        LocalizationManager manager = Object.FindFirstObjectByType<LocalizationManager>();
         if (manager == null)
         {
             EditorUtility.DisplayDialog("Sin Manager",
@@ -129,7 +129,7 @@ public static class IdiomasPrefabCreator
     {
         GameObject go = new GameObject("LocalizationManager");
         Undo.RegisterCreatedObjectUndo(go, "Crear LocalizationManager");
-        LocalizationManager mgr = go.AddComponent<LocalizationManager>();
+        LocalizationManager mgr = UdonSharpUndo.AddComponent<LocalizationManager>(go);
         TextAsset tf = FindTranslationFile();
         if (tf != null) SetField(mgr, "translationFile", tf);
         Selection.activeGameObject = go;
@@ -420,7 +420,7 @@ public static class IdiomasPrefabCreator
         y -= 28f;
         MakeTMP(p, "Tooltip", "Hover over any option for more details.", new Vector2(0, y - 6f), new Vector2(420, 18), COL_DIMMED, 9f, TextAlignmentOptions.Midline);
 
-        CanvasLocalizer cl = canvas.AddComponent<CanvasLocalizer>();
+        CanvasLocalizer cl = UdonSharpUndo.AddComponent<CanvasLocalizer>(canvas);
         SerializedObject clSO = new SerializedObject(cl);
         SetPropObj(clSO, "manager", manager);
         SetPropStr(clSO, "canvasId", "demo");
@@ -493,9 +493,17 @@ public static class IdiomasPrefabCreator
         SerializedProperty p = so.FindProperty(f); if (p != null) p.stringValue = v; }
 
     private static TextAsset FindTranslationFile() {
-        string[] g = AssetDatabase.FindAssets("t:TextAsset", new[] { "Assets/Idiomas/Data" });
-        for (int i = 0; i < g.Length; i++) { string p = AssetDatabase.GUIDToAssetPath(g[i]);
-            if (p.EndsWith(".json")) return AssetDatabase.LoadAssetAtPath<TextAsset>(p); } return null; }
+        // Buscar en Assets/ (copia local o datos del usuario) y Packages/ (instalado via VPM)
+        string[][] searchPaths = new string[][] {
+            new[] { "Assets/Idiomas_Data" },
+            new[] { "Assets/Idiomas/Data" },
+            new[] { "Packages/com.benderdios.idiomas/Data" }
+        };
+        for (int s = 0; s < searchPaths.Length; s++) {
+            string[] g = AssetDatabase.FindAssets("t:TextAsset", searchPaths[s]);
+            for (int i = 0; i < g.Length; i++) { string p = AssetDatabase.GUIDToAssetPath(g[i]);
+                if (p.EndsWith(".json")) return AssetDatabase.LoadAssetAtPath<TextAsset>(p); }
+        } return null; }
 
     private static System.Type FindType(string fullName) {
         foreach (var a in System.AppDomain.CurrentDomain.GetAssemblies()) {

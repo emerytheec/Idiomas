@@ -235,11 +235,8 @@ public class LocalizationManager : UdonSharpBehaviour
                 return "ko";
 
             // === Espanol (es) ===
-            // Windows: Romance Standard Time cubre Espana, Francia, Italia, Belgica.
-            // Para PC, la mayoria de usuarios VRChat en esa zona son hispanohablantes,
-            // pero es ambiguo. Usamos IANA para ser precisos cuando sea posible.
-            case "Romance Standard Time":     // Windows (Espana/Francia/Italia - ambiguo)
-                return "es";
+            // NOTA: "Romance Standard Time" (Windows) cubre Espana, Francia, Italia, Belgica.
+            // Es demasiado ambiguo — se omite para que caiga al fallback.
             // IANA: Espana
             case "Europe/Madrid":
             case "Atlantic/Canary":
@@ -292,7 +289,7 @@ public class LocalizationManager : UdonSharpBehaviour
             case "Europe/Berlin":             // IANA
             case "Europe/Vienna":             // IANA
             case "Europe/Zurich":             // IANA
-            case "Europe/Amsterdam":          // IANA (Paises Bajos - aleman cercano)
+            // NOTA: Europe/Amsterdam (Paises Bajos) se omite — hablan neerlandes, no aleman.
                 return "de";
 
             // === Ruso (ru) ===
@@ -329,7 +326,8 @@ public class LocalizationManager : UdonSharpBehaviour
             case "America/Belem":             // IANA
             case "America/Recife":            // IANA
             case "Europe/Lisbon":             // IANA (Portugal)
-            case "GMT Standard Time":         // Windows (Portugal/UK - ambiguo, pero pt-BR es mas util)
+            // NOTA: "GMT Standard Time" (Windows) cubre UK + Irlanda + Portugal.
+            // Es demasiado ambiguo — se omite para que caiga al fallback "en".
                 return "pt-BR";
 
             // === Catalan (ca) ===
@@ -412,6 +410,7 @@ public class LocalizationManager : UdonSharpBehaviour
 
         _currentLanguage = resolved;
         CacheLangDictionaries();
+        SyncDropdownToCurrentLanguage();
 
         Debug.Log($"[LocalizationManager] Idioma cambiado a: {resolved}");
         ApplyToAll();

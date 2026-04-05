@@ -37,14 +37,23 @@ public class CsvExportImportWindow : EditorWindow
 
     private void FindJsonPath()
     {
-        string[] guids = AssetDatabase.FindAssets("t:TextAsset", new[] { "Assets/Idiomas/Data" });
-        for (int i = 0; i < guids.Length; i++)
+        // Buscar en Assets/ (datos del usuario) y Packages/ (instalado via VPM)
+        string[][] searchPaths = new string[][] {
+            new[] { "Assets/Idiomas_Data" },
+            new[] { "Assets/Idiomas/Data" },
+            new[] { "Packages/com.benderdios.idiomas/Data" }
+        };
+        for (int s = 0; s < searchPaths.Length; s++)
         {
-            string path = AssetDatabase.GUIDToAssetPath(guids[i]);
-            if (path.EndsWith("translation.json"))
+            string[] guids = AssetDatabase.FindAssets("t:TextAsset", searchPaths[s]);
+            for (int i = 0; i < guids.Length; i++)
             {
-                _jsonPath = Path.GetFullPath(path);
-                return;
+                string path = AssetDatabase.GUIDToAssetPath(guids[i]);
+                if (path.EndsWith("translation.json"))
+                {
+                    _jsonPath = Path.GetFullPath(path);
+                    return;
+                }
             }
         }
         _jsonPath = "";
@@ -70,7 +79,7 @@ public class CsvExportImportWindow : EditorWindow
         if (string.IsNullOrEmpty(_jsonPath) || !File.Exists(_jsonPath))
         {
             EditorGUILayout.HelpBox(
-                "No se encontro translation.json en Assets/Idiomas/Data/.\n" +
+                "No se encontro translation.json.\n" +
                 "Exporta primero desde un CanvasLocalizer.", MessageType.Warning);
         }
 
@@ -273,7 +282,7 @@ public class CsvExportImportWindow : EditorWindow
 
         // Escribir JSON
         if (string.IsNullOrEmpty(_jsonPath))
-            _jsonPath = Path.GetFullPath("Assets/Idiomas/Data/translation.json");
+            _jsonPath = Path.GetFullPath("Assets/Idiomas_Data/translation.json");
 
         string dir = Path.GetDirectoryName(_jsonPath);
         if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);

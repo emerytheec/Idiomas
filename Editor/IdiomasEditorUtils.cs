@@ -140,7 +140,7 @@ public static class IdiomasEditorUtils
         if (string.IsNullOrEmpty(baseName)) baseName = "canvas";
 
         HashSet<string> usedIds = new HashSet<string>();
-        CanvasLocalizer[] allLocalizers = Object.FindObjectsOfType<CanvasLocalizer>(true);
+        CanvasLocalizer[] allLocalizers = Object.FindObjectsByType<CanvasLocalizer>(FindObjectsInactive.Include, FindObjectsSortMode.None);
         for (int i = 0; i < allLocalizers.Length; i++)
         {
             if (allLocalizers[i] == self) continue;

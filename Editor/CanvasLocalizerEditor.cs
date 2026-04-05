@@ -237,7 +237,7 @@ public class CanvasLocalizerEditor : Editor
         CanvasLocalizer cl = target as CanvasLocalizer;
         if (cl == null) return null;
 
-        CanvasLocalizer[] allLocalizers = Object.FindObjectsOfType<CanvasLocalizer>(true);
+        CanvasLocalizer[] allLocalizers = FindObjectsByType<CanvasLocalizer>(FindObjectsInactive.Include, FindObjectsSortMode.None);
         for (int i = 0; i < allLocalizers.Length; i++)
         {
             if (allLocalizers[i] == cl) continue;
@@ -809,7 +809,7 @@ public class CanvasLocalizerEditor : Editor
     /// <summary>
     /// Ruta por defecto donde se crea el JSON si no existe ninguno.
     /// </summary>
-    private const string DEFAULT_JSON_DIR = "Assets/Idiomas/Data";
+    private const string DEFAULT_JSON_DIR = "Assets/Idiomas_Data";
     private const string DEFAULT_JSON_NAME = "translation.json";
 
     private void ExportToJsonAndApply()

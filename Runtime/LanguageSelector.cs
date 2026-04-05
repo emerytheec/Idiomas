@@ -160,6 +160,20 @@ public class LanguageSelector : UdonSharpBehaviour
 
     private void Start()
     {
+        // Registrarse como listener para que los indicadores se actualicen
+        // cuando el idioma cambia desde cualquier fuente (dropdown, otro script, VRChat API)
+        if (Utilities.IsValid(manager))
+        {
+            manager.RegisterListener(this);
+        }
+        UpdateIndicators();
+    }
+
+    /// <summary>
+    /// Recibido automaticamente del LocalizationManager cuando cambia el idioma.
+    /// </summary>
+    public void _OnLanguageChanged()
+    {
         UpdateIndicators();
     }
 

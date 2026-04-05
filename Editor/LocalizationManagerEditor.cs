@@ -54,6 +54,11 @@ public class LocalizationManagerEditor : Editor
         _languageDropdown = serializedObject.FindProperty("_languageDropdown");
         _dropdownLanguageCodes = serializedObject.FindProperty("_dropdownLanguageCodes");
         _listeners = serializedObject.FindProperty("_listeners");
+
+        // Limpiar resultados de escaneo anteriores para evitar
+        // MissingReferenceException por GameObjects destruidos
+        // (la lista es static y puede sobrevivir entre recargas)
+        _canvasSearchResults = null;
     }
 
     public override void OnInspectorGUI()
@@ -69,8 +74,22 @@ public class LocalizationManagerEditor : Editor
         EditorGUILayout.Space(3);
 
         // === CONFIGURACION BASICA ===
+        EditorGUILayout.BeginHorizontal();
         EditorGUILayout.PropertyField(_translationFile,
             new GUIContent("Archivo de Traducciones"));
+
+        bool hasJson = _translationFile.objectReferenceValue != null;
+        string createBtnLabel = hasJson ? "Crear Nuevo" : "Crear JSON";
+        string createBtnTooltip = hasJson
+            ? "Crea un nuevo archivo JSON vacio sin borrar el actual."
+            : "Crea un archivo JSON vacio para tus traducciones.";
+
+        if (GUILayout.Button(new GUIContent(createBtnLabel, createBtnTooltip),
+            GUILayout.Width(82), GUILayout.Height(18)))
+        {
+            CreateTranslationJsonFile();
+        }
+        EditorGUILayout.EndHorizontal();
 
         // Idioma de Fallback como dropdown
         string currentFallback = _fallbackLanguage.stringValue;
@@ -425,6 +444,9 @@ public class LocalizationManagerEditor : Editor
             });
         }
 
+        // Filtrar GameObjects destruidos antes de ordenar
+        _canvasSearchResults.RemoveAll(r => r.gameObject == null);
+
         // Ordenar: primero los que NO tienen CanvasLocalizer, luego los que si
         _canvasSearchResults.Sort((a, b) =>
         {
@@ -455,6 +477,12 @@ public class LocalizationManagerEditor : Editor
             ScanSceneForCanvas();
         }
         GUI.backgroundColor = Color.white;
+
+        // Filtrar elementos con GameObjects destruidos (evita MissingReferenceException)
+        if (_canvasSearchResults != null)
+        {
+            _canvasSearchResults.RemoveAll(r => r.gameObject == null);
+        }
 
         // === CONFIGURACION RAPIDA ===
         // Solo mostrar si hay resultados de escaneo con candidatos
@@ -613,6 +641,7 @@ public class LocalizationManagerEditor : Editor
                 hasLocalized = true;
             }
 
+            if (r.gameObject == null) continue;
             CanvasLocalizer cl = r.gameObject.GetComponent<CanvasLocalizer>();
             string clId = cl != null ? cl.GetCanvasId() : "";
 
@@ -785,6 +814,24 @@ public class LocalizationManagerEditor : Editor
         if (idProp != null) idProp.stringValue = uniqueId;
 
         clSO.ApplyModifiedProperties();
+
+        // Registrar en el array canvasLocalizers del manager
+        bool alreadyRegistered = false;
+        for (int i = 0; i < _canvasLocalizers.arraySize; i++)
+        {
+            if (_canvasLocalizers.GetArrayElementAtIndex(i).objectReferenceValue == newCL)
+            {
+                alreadyRegistered = true;
+                break;
+            }
+        }
+        if (!alreadyRegistered)
+        {
+            int idx = _canvasLocalizers.arraySize;
+            _canvasLocalizers.arraySize = idx + 1;
+            _canvasLocalizers.GetArrayElementAtIndex(idx).objectReferenceValue = newCL;
+            serializedObject.ApplyModifiedProperties();
+        }
 
         // Marcar resultado como ya localizado
         result.hasCanvasLocalizer = true;
@@ -990,7 +1037,7 @@ public class LocalizationManagerEditor : Editor
         }
         else
         {
-            assetPath = "Assets/Idiomas/Data/translation.json";
+            assetPath = "Assets/Idiomas_Data/translation.json";
             fullPath = Path.GetFullPath(assetPath);
             translations = new Dictionary<string, Dictionary<string, string>>();
             string dir = Path.GetDirectoryName(fullPath);
@@ -1146,9 +1193,11 @@ public class LocalizationManagerEditor : Editor
     private void RefreshCache()
     {
         TextAsset ta = _translationFile.objectReferenceValue as TextAsset;
-        if (ta == null) { _cachedData = null; _cachedLanguages = null; _cachedKeys = null; return; }
+        if (ta == null) { _cachedData = null; _cachedLanguages = null; _cachedKeys = null; _cachedJsonHash = null; return; }
 
-        string hash = ta.text.GetHashCode().ToString();
+        // Usar longitud + primeros/ultimos chars como hash rapido y determinístico
+        string text = ta.text;
+        string hash = text.Length + (text.Length > 0 ? "_" + text[0] + text[text.Length - 1] : "");
         if (hash == _cachedJsonHash) return;
         _cachedJsonHash = hash;
 
@@ -1172,6 +1221,68 @@ public class LocalizationManagerEditor : Editor
             }
             _cachedKeys = new string[all.Count];
             all.CopyTo(_cachedKeys);
+        }
+    }
+
+    // =====================================================================
+    // Crear archivo JSON de traducciones
+    // =====================================================================
+
+    /// <summary>
+    /// Ruta base donde se crean los archivos JSON de traducciones.
+    /// Se usa Assets/ (no Packages/) porque los paquetes VPM son de solo lectura.
+    /// </summary>
+    private const string JSON_BASE_DIR = "Assets/Idiomas_Data";
+    private const string JSON_BASE_NAME = "translation";
+
+    private void CreateTranslationJsonFile()
+    {
+        // Asegurar que el directorio existe
+        string fullDir = Path.GetFullPath(JSON_BASE_DIR);
+        if (!Directory.Exists(fullDir))
+        {
+            Directory.CreateDirectory(fullDir);
+        }
+
+        // Buscar nombre disponible: translation.json, translation_2.json, translation_3.json...
+        string assetPath = JSON_BASE_DIR + "/" + JSON_BASE_NAME + ".json";
+        string fullPath = Path.GetFullPath(assetPath);
+
+        if (File.Exists(fullPath))
+        {
+            int counter = 2;
+            while (true)
+            {
+                assetPath = JSON_BASE_DIR + "/" + JSON_BASE_NAME + "_" + counter + ".json";
+                fullPath = Path.GetFullPath(assetPath);
+                if (!File.Exists(fullPath)) break;
+                counter++;
+            }
+        }
+
+        // Escribir JSON vacio
+        File.WriteAllText(fullPath, "{}\n", Encoding.UTF8);
+        AssetDatabase.Refresh();
+
+        // Cargar el asset recien creado y asignarlo al campo
+        TextAsset newAsset = AssetDatabase.LoadAssetAtPath<TextAsset>(assetPath);
+        if (newAsset != null)
+        {
+            _translationFile.objectReferenceValue = newAsset;
+            serializedObject.ApplyModifiedProperties();
+
+            // Invalidar cache para que las estadisticas se actualicen
+            _cachedJsonHash = null;
+
+            Debug.Log($"[Idiomas] Archivo de traducciones creado: {assetPath}");
+            EditorUtility.DisplayDialog("Archivo Creado",
+                $"Se creo el archivo de traducciones:\n{assetPath}\n\n" +
+                "Usa 'Escanear Escena' y 'Exportar al JSON' para llenarlo con tus textos.",
+                "OK");
+        }
+        else
+        {
+            Debug.LogError($"[Idiomas] No se pudo cargar el archivo creado: {assetPath}");
         }
     }
 }

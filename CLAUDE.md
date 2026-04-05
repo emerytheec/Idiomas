@@ -31,10 +31,11 @@ pero eso es la **copia de trabajo local**. NO se sube al repo de YamaPlayer-Kara
 git clone https://github.com/emerytheec/Idiomas.git /tmp/Idiomas-repo
 
 # 2. Copiar archivos mejorados desde el proyecto Unity al clon
-#    (solo Runtime/, Editor/, Data/, README.md — NO copiar .meta de Unity)
+#    (solo Runtime/, Editor/, README.md — NO copiar .meta de Unity)
+#    IMPORTANTE: NO copiar translation.json — el repo lleva un JSON vacio {}
+#    para que cada usuario genere sus propias traducciones con la herramienta.
 cp Assets/Idiomas/Runtime/*.cs /tmp/Idiomas-repo/Runtime/
 cp Assets/Idiomas/Editor/*.cs /tmp/Idiomas-repo/Editor/
-cp Assets/Idiomas/Data/translation.json /tmp/Idiomas-repo/Data/
 cp Assets/Idiomas/README.md /tmp/Idiomas-repo/README.md
 
 # 3. Configurar git en el clon
@@ -69,6 +70,7 @@ El workflow automaticamente:
 - **NUNCA** mezclar commits de Idiomas con commits de YamaPlayer
 - **NUNCA** cambiar el nombre del paquete (`com.benderdios.idiomas` es el correcto)
 - **NUNCA** subir escenas (.unity), SerializedUdonPrograms, ClientSimStorage ni archivos de trabajo de Unity a ningun repo
+- **NUNCA** copiar `translation.json` local al repo de Idiomas — el repo lleva un JSON vacio `{}` para que usuarios generen sus propias traducciones
 
 ---
 

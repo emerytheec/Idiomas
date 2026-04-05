@@ -35,6 +35,25 @@ public class LanguageButton : UdonSharpBehaviour
              "Se asigna automaticamente al crear la demo.")]
     [SerializeField] private LanguageButton[] allButtons;
 
+    private void Start()
+    {
+        // Registrarse como listener para que el indicador se actualice
+        // cuando el idioma cambia desde cualquier fuente (dropdown, otro script, VRChat API)
+        if (Utilities.IsValid(manager))
+        {
+            manager.RegisterListener(this);
+        }
+        _RefreshIndicator();
+    }
+
+    /// <summary>
+    /// Recibido automaticamente del LocalizationManager cuando cambia el idioma.
+    /// </summary>
+    public void _OnLanguageChanged()
+    {
+        _RefreshIndicator();
+    }
+
     /// <summary>
     /// Llamado por Button.OnClick via UdonBehaviour.SendCustomEvent("OnClick")
     /// </summary>
