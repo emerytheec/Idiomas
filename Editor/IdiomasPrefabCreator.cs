@@ -6,20 +6,9 @@ using UdonSharp;
 using UdonSharpEditor;
 using VRC.Udon;
 using System.Collections.Generic;
-using System.IO;
-using UnityEditorInternal;
 
 /// <summary>
-/// Herramienta de Editor para crear los componentes del sistema de Idiomas.
-///
-/// SOLUCION AL PROBLEMA DE UDONBEHAVIOUR:
-/// En vez de crear un UdonSharpBehaviour nuevo (LanguageDropdown) que necesita
-/// un UdonBehaviour que UdonSharp nunca crea desde AddComponent,
-/// el dropdown se conecta directamente al UdonBehaviour del LocalizationManager,
-/// que YA EXISTE porque se creo correctamente al compilar la escena.
-///
-/// El metodo OnLanguageDropdownChanged() vive en LocalizationManager.cs,
-/// asi que no se necesita ningun UdonBehaviour nuevo.
+/// Herramienta de Editor para crear componentes de demostracion del sistema de Idiomas.
 /// </summary>
 public static class IdiomasPrefabCreator
 {
@@ -37,70 +26,11 @@ public static class IdiomasPrefabCreator
     private static readonly Color COL_TOG_ON   = new Color(0.2f, 0.65f, 0.45f, 1f);
     private static readonly Color COL_TOG_OFF  = new Color(0.45f, 0.2f, 0.2f, 1f);
 
-    // Idiomas centralizados en IdiomasLanguages.cs + entrada "Auto" para dropdown
-    private static readonly string[,] LANGS = BuildLangsArray();
-
-    private static string[,] BuildLangsArray()
-    {
-        int count = IdiomasLanguages.Codes.Length;
-        string[,] result = new string[count + 1, 2];
-        result[0, 0] = "";
-        result[0, 1] = "Auto (Detect)";
-        for (int i = 0; i < count; i++)
-        {
-            result[i + 1, 0] = IdiomasLanguages.Codes[i];
-            result[i + 1, 1] = IdiomasLanguages.LatinNames[i];
-        }
-        return result;
-    }
-
-    // =====================================================================
-    // Menu: Crear Selector de Idioma
-    // =====================================================================
-
-    [MenuItem("GameObject/Idiomas/Crear Selector de Idioma", false, 10)]
-    public static void CreateLanguageSelector()
-    {
-        // Buscar o crear LocalizationManager
-        LocalizationManager manager = Object.FindFirstObjectByType<LocalizationManager>();
-        bool createdManager = false;
-
-        if (manager == null)
-        {
-            GameObject mgrGO = new GameObject("LocalizationManager");
-            Undo.RegisterCreatedObjectUndo(mgrGO, "Crear LocalizationManager");
-            manager = UdonSharpUndo.AddComponent<LocalizationManager>(mgrGO);
-            TextAsset tf = FindTranslationFile();
-            if (tf != null) SetField(manager, "translationFile", tf);
-            createdManager = true;
-        }
-
-        // Crear canvas del selector
-        GameObject selectorCanvas = CreateSelectorCanvas(manager);
-        Undo.RegisterCreatedObjectUndo(selectorCanvas, "Crear Selector de Idioma");
-        Selection.activeGameObject = selectorCanvas;
-
-        // Cablear OnValueChanged al UdonBehaviour del LocalizationManager
-        // (que ya existe porque manager fue creado por AddComponent + compilacion)
-        _pendingManager = manager;
-        _pendingDropdownCanvas = selectorCanvas;
-        _wireAttempts = 0;
-        EditorApplication.update += TryWireDropdown;
-
-        // Configurar fallback fonts de TMP automaticamente
-        IdiomasFontSetup.SetupFonts();
-
-        string msg = createdManager
-            ? "[Idiomas] LocalizationManager + Selector creados. Cableando dropdown..."
-            : "[Idiomas] Selector creado. Cableando dropdown al LocalizationManager existente...";
-        Debug.Log(msg);
-    }
-
     // =====================================================================
     // Menu: Crear Canvas de Ejemplo
     // =====================================================================
 
-    [MenuItem("GameObject/Idiomas/Crear Canvas de Ejemplo", false, 11)]
+    [MenuItem("Tools/Idiomas/Crear Canvas de Ejemplo", false, 10)]
     public static void CreateDemoExample()
     {
         LocalizationManager manager = Object.FindFirstObjectByType<LocalizationManager>();
@@ -108,7 +38,7 @@ public static class IdiomasPrefabCreator
         {
             EditorUtility.DisplayDialog("Sin Manager",
                 "No hay LocalizationManager en la escena.\n" +
-                "Usa primero 'Crear Selector de Idioma'.", "OK");
+                "Arrastra el prefab LocalizationManager a la escena primero.", "OK");
             return;
         }
 
@@ -118,247 +48,6 @@ public static class IdiomasPrefabCreator
 
         Debug.Log("[Idiomas] Canvas de ejemplo creado.\n" +
                   "Seleccionalo > Inspector > Escanear Canvas > Exportar al JSON y Aplicar.");
-    }
-
-    // =====================================================================
-    // Menu: Solo Manager
-    // =====================================================================
-
-    [MenuItem("GameObject/Idiomas/Crear LocalizationManager (sin UI)", false, 20)]
-    public static void CreateManagerOnly()
-    {
-        GameObject go = new GameObject("LocalizationManager");
-        Undo.RegisterCreatedObjectUndo(go, "Crear LocalizationManager");
-        LocalizationManager mgr = UdonSharpUndo.AddComponent<LocalizationManager>(go);
-        TextAsset tf = FindTranslationFile();
-        if (tf != null) SetField(mgr, "translationFile", tf);
-        Selection.activeGameObject = go;
-
-        // Configurar fallback fonts de TMP automaticamente
-        IdiomasFontSetup.SetupFonts();
-
-        Debug.Log("[Idiomas] LocalizationManager creado.");
-    }
-
-    // =====================================================================
-    // Cableado del dropdown → LocalizationManager.OnLanguageDropdownChanged
-    // =====================================================================
-
-    private static LocalizationManager _pendingManager;
-    private static GameObject _pendingDropdownCanvas;
-    private static int _wireAttempts;
-
-    private static void TryWireDropdown()
-    {
-        _wireAttempts++;
-
-        if (_pendingManager == null || _pendingDropdownCanvas == null)
-        {
-            EditorApplication.update -= TryWireDropdown;
-            return;
-        }
-
-        if (_wireAttempts > 600)
-        {
-            EditorApplication.update -= TryWireDropdown;
-            Debug.LogError("[Idiomas] Timeout buscando UdonBehaviour del LocalizationManager.\n" +
-                "Selecciona el LocalizationManager en la jerarquia, luego usa 'Conectar Dropdown'.");
-            return;
-        }
-
-        // En el frame 5, forzar que UdonSharp procese el componente
-        // seleccionando el objeto y marcandolo como dirty.
-        // UdonSharp crea el UdonBehaviour cuando el Inspector lo dibuja.
-        if (_wireAttempts == 5)
-        {
-            Selection.activeGameObject = _pendingManager.gameObject;
-            EditorUtility.SetDirty(_pendingManager);
-            UnityEditorInternal.InternalEditorUtility.RepaintAllViews();
-        }
-
-        // Buscar el UdonBehaviour del LocalizationManager
-        UdonBehaviour mgrUdon = IdiomasEditorUtils.FindUdonBehaviourFor(_pendingManager);
-        if (mgrUdon == null) return; // Reintentar
-
-        // Encontrado!
-        EditorApplication.update -= TryWireDropdown;
-
-        TMP_Dropdown dropdown = _pendingDropdownCanvas.GetComponentInChildren<TMP_Dropdown>(true);
-        if (dropdown == null)
-        {
-            Debug.LogError("[Idiomas] TMP_Dropdown no encontrado en el selector.");
-            return;
-        }
-
-        // Cablear: Dropdown.OnValueChanged → mgrUdon.SendCustomEvent("OnLanguageDropdownChanged")
-        WireEvent(dropdown, mgrUdon, "OnLanguageDropdownChanged");
-
-        // Configurar referencia al dropdown y codigos en el manager
-        SerializedObject mgrSO = new SerializedObject(_pendingManager);
-        SerializedProperty ddProp = mgrSO.FindProperty("_languageDropdown");
-        if (ddProp != null) ddProp.objectReferenceValue = dropdown;
-
-        int langCount = LANGS.GetLength(0);
-        SerializedProperty codesProp = mgrSO.FindProperty("_dropdownLanguageCodes");
-        if (codesProp != null)
-        {
-            codesProp.arraySize = langCount;
-            for (int i = 0; i < langCount; i++)
-                codesProp.GetArrayElementAtIndex(i).stringValue = LANGS[i, 0];
-        }
-        mgrSO.ApplyModifiedProperties();
-
-        Debug.Log($"[Idiomas] Dropdown conectado al LocalizationManager (intento {_wireAttempts}). Listo para Play!");
-
-        _pendingManager = null;
-        _pendingDropdownCanvas = null;
-    }
-
-
-    private static void WireEvent(TMP_Dropdown dropdown,
-        UdonBehaviour udon, string eventName)
-    {
-        SerializedObject ddSO = new SerializedObject(dropdown);
-        SerializedProperty onVal = ddSO.FindProperty("m_OnValueChanged");
-        SerializedProperty calls = onVal.FindPropertyRelative("m_PersistentCalls.m_Calls");
-
-        calls.ClearArray();
-        calls.arraySize = 1;
-        SerializedProperty entry = calls.GetArrayElementAtIndex(0);
-        entry.FindPropertyRelative("m_Target").objectReferenceValue = udon;
-        entry.FindPropertyRelative("m_MethodName").stringValue = "SendCustomEvent";
-        entry.FindPropertyRelative("m_Mode").intValue = 5;
-        entry.FindPropertyRelative("m_Arguments")
-            .FindPropertyRelative("m_StringArgument").stringValue = eventName;
-        entry.FindPropertyRelative("m_CallState").intValue = 2;
-        ddSO.ApplyModifiedProperties();
-    }
-
-    // =====================================================================
-    // Crear canvas selector con dropdown
-    // =====================================================================
-
-    private static GameObject CreateSelectorCanvas(LocalizationManager manager)
-    {
-        GameObject canvas = CreateWorldCanvas(null, "LanguageSelector",
-            new Vector2(300, 140), Vector3.zero);
-        GameObject bg = MakePanel(canvas.transform, "Bg", COL_BG,
-            Vector2.zero, new Vector2(300, 140));
-
-        GameObject header = MakePanel(bg.transform, "Header", COL_HEADER,
-            new Vector2(0, 46), new Vector2(280, 36));
-        MakeTMP(header.transform, "Title", "Language",
-            Vector2.zero, new Vector2(260, 30), COL_TEXT, 16f,
-            TextAlignmentOptions.Center);
-
-        CreateTMPDropdown(bg.transform, "Dropdown",
-            new Vector2(0, -2), new Vector2(260, 38));
-
-        MakeTMP(bg.transform, "Info", "Select your language",
-            new Vector2(0, -40), new Vector2(260, 18), COL_DIMMED, 9f,
-            TextAlignmentOptions.Center);
-
-        return canvas;
-    }
-
-    private static GameObject CreateTMPDropdown(Transform parent, string name,
-        Vector2 pos, Vector2 size)
-    {
-        GameObject go = new GameObject(name);
-        go.transform.SetParent(parent, false);
-        RectTransform rt = go.AddComponent<RectTransform>();
-        rt.anchoredPosition = pos; rt.sizeDelta = size;
-        Image bgImg = go.AddComponent<Image>();
-        bgImg.color = new Color(0.2f, 0.2f, 0.25f, 1f);
-
-        // Label
-        TextMeshProUGUI labelTMP = MakeTMP(go.transform, "Label", LANGS[0, 1],
-            Vector2.zero, Vector2.zero, COL_TEXT, 14f, TextAlignmentOptions.MidlineLeft);
-        RectTransform lrt = labelTMP.GetComponent<RectTransform>();
-        lrt.anchorMin = Vector2.zero; lrt.anchorMax = Vector2.one;
-        lrt.offsetMin = new Vector2(10, 2); lrt.offsetMax = new Vector2(-30, -2);
-
-        // Arrow
-        TextMeshProUGUI arrowTMP = MakeTMP(go.transform, "Arrow", "v",
-            Vector2.zero, Vector2.zero, COL_DIMMED, 14f, TextAlignmentOptions.Center);
-        RectTransform art = arrowTMP.GetComponent<RectTransform>();
-        art.anchorMin = new Vector2(1, 0); art.anchorMax = new Vector2(1, 1);
-        art.offsetMin = new Vector2(-28, 2); art.offsetMax = new Vector2(-8, -2);
-
-        // Template
-        GameObject templateGO = new GameObject("Template");
-        templateGO.transform.SetParent(go.transform, false);
-        RectTransform trt = templateGO.AddComponent<RectTransform>();
-        trt.anchorMin = new Vector2(0, 0); trt.anchorMax = new Vector2(1, 0);
-        trt.pivot = new Vector2(0.5f, 1f); trt.sizeDelta = new Vector2(0, 200);
-        templateGO.AddComponent<Image>().color = new Color(0.15f, 0.15f, 0.18f, 0.98f);
-        ScrollRect scroll = templateGO.AddComponent<ScrollRect>();
-        scroll.movementType = ScrollRect.MovementType.Clamped;
-
-        // Viewport
-        GameObject vpGO = new GameObject("Viewport");
-        vpGO.transform.SetParent(templateGO.transform, false);
-        RectTransform vprt = vpGO.AddComponent<RectTransform>();
-        vprt.anchorMin = Vector2.zero; vprt.anchorMax = Vector2.one;
-        vprt.offsetMin = Vector2.zero; vprt.offsetMax = Vector2.zero;
-        vpGO.AddComponent<Image>().color = new Color(1, 1, 1, 0.003f);
-        vpGO.AddComponent<Mask>().showMaskGraphic = false;
-        scroll.viewport = vprt;
-
-        // Content
-        GameObject cGO = new GameObject("Content");
-        cGO.transform.SetParent(vpGO.transform, false);
-        RectTransform crt = cGO.AddComponent<RectTransform>();
-        crt.anchorMin = new Vector2(0, 1); crt.anchorMax = new Vector2(1, 1);
-        crt.pivot = new Vector2(0.5f, 1f); crt.sizeDelta = Vector2.zero;
-        scroll.content = crt;
-
-        // Item
-        GameObject itemGO = new GameObject("Item");
-        itemGO.transform.SetParent(cGO.transform, false);
-        RectTransform irt = itemGO.AddComponent<RectTransform>();
-        irt.anchorMin = new Vector2(0, 0.5f); irt.anchorMax = new Vector2(1, 0.5f);
-        irt.sizeDelta = new Vector2(0, 30);
-        Toggle tog = itemGO.AddComponent<Toggle>();
-        Image itemBg = itemGO.AddComponent<Image>();
-        itemBg.color = new Color(0.2f, 0.2f, 0.25f, 1f);
-        tog.targetGraphic = itemBg;
-
-        GameObject chkGO = new GameObject("Item Checkmark");
-        chkGO.transform.SetParent(itemGO.transform, false);
-        RectTransform chkrt = chkGO.AddComponent<RectTransform>();
-        chkrt.anchorMin = Vector2.zero; chkrt.anchorMax = Vector2.one;
-        chkrt.offsetMin = Vector2.zero; chkrt.offsetMax = Vector2.zero;
-        Image chkImg = chkGO.AddComponent<Image>();
-        chkImg.color = new Color(0.25f, 0.55f, 0.85f, 0.3f);
-        tog.graphic = chkImg;
-
-        TextMeshProUGUI itemLabelTMP = MakeTMP(itemGO.transform, "Item Label", "Option",
-            Vector2.zero, Vector2.zero, COL_TEXT, 12f, TextAlignmentOptions.MidlineLeft);
-        RectTransform ilrt = itemLabelTMP.GetComponent<RectTransform>();
-        ilrt.anchorMin = Vector2.zero; ilrt.anchorMax = Vector2.one;
-        ilrt.offsetMin = new Vector2(10, 2); ilrt.offsetMax = new Vector2(-10, -2);
-
-        // TMP_Dropdown
-        TMP_Dropdown dd = go.AddComponent<TMP_Dropdown>();
-        dd.template = trt; dd.captionText = labelTMP; dd.itemText = itemLabelTMP;
-        dd.targetGraphic = bgImg;
-        ColorBlock c = dd.colors;
-        c.normalColor = new Color(0.2f, 0.2f, 0.25f, 1f);
-        c.highlightedColor = new Color(0.28f, 0.28f, 0.35f, 1f);
-        c.pressedColor = COL_ACCENT;
-        c.selectedColor = new Color(0.2f, 0.2f, 0.25f, 1f);
-        dd.colors = c;
-        Navigation nav = dd.navigation; nav.mode = Navigation.Mode.None; dd.navigation = nav;
-
-        dd.ClearOptions();
-        List<string> opts = new List<string>();
-        for (int i = 0; i < LANGS.GetLength(0); i++) opts.Add(LANGS[i, 1]);
-        dd.AddOptions(opts);
-        dd.value = 0; dd.RefreshShownValue();
-        templateGO.SetActive(false);
-
-        return go;
     }
 
     // =====================================================================
@@ -483,27 +172,10 @@ public static class IdiomasPrefabCreator
         RectTransform r = go.GetComponent<RectTransform>();
         r.sizeDelta = size; r.localScale = Vector3.one * 0.001f; return go; }
 
-    private static void SetField(Object target, string field, Object value) {
-        SerializedObject so = new SerializedObject(target);
-        SerializedProperty p = so.FindProperty(field);
-        if (p != null) { p.objectReferenceValue = value; so.ApplyModifiedProperties(); } }
     private static void SetPropObj(SerializedObject so, string f, Object v) {
         SerializedProperty p = so.FindProperty(f); if (p != null) p.objectReferenceValue = v; }
     private static void SetPropStr(SerializedObject so, string f, string v) {
         SerializedProperty p = so.FindProperty(f); if (p != null) p.stringValue = v; }
-
-    private static TextAsset FindTranslationFile() {
-        // Buscar en Assets/ (copia local o datos del usuario) y Packages/ (instalado via VPM)
-        string[][] searchPaths = new string[][] {
-            new[] { "Assets/Idiomas_Data" },
-            new[] { "Assets/Idiomas/Data" },
-            new[] { "Packages/com.benderdios.idiomas/Data" }
-        };
-        for (int s = 0; s < searchPaths.Length; s++) {
-            string[] g = AssetDatabase.FindAssets("t:TextAsset", searchPaths[s]);
-            for (int i = 0; i < g.Length; i++) { string p = AssetDatabase.GUIDToAssetPath(g[i]);
-                if (p.EndsWith(".json")) return AssetDatabase.LoadAssetAtPath<TextAsset>(p); }
-        } return null; }
 
     private static System.Type FindType(string fullName) {
         foreach (var a in System.AppDomain.CurrentDomain.GetAssemblies()) {

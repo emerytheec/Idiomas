@@ -153,29 +153,4 @@ public static class IdiomasFontSetup
         return null;
     }
 
-    // =====================================================================
-    // Menu manual
-    // =====================================================================
-
-    [MenuItem("GameObject/Idiomas/Configurar Fonts TMP", false, 30)]
-    public static void MenuSetupFonts()
-    {
-        int result = SetupFonts();
-        if (result > 0)
-        {
-            EditorUtility.DisplayDialog("Fonts Configuradas",
-                $"Se agregaron {result} font(s) de fallback a TMP Settings:\n\n" +
-                "- NotoSansJP SDF (japones, chino)\n" +
-                "- NotoSansKR SDF (coreano, cirilico)\n\n" +
-                "Los caracteres CJK y cirilicos ahora se mostraran correctamente.",
-                "OK");
-        }
-        else if (result == 0)
-        {
-            EditorUtility.DisplayDialog("Ya Configuradas",
-                "Las fallback fonts ya estaban en TMP Settings.\n" +
-                "No se necesitan cambios.", "OK");
-        }
-        // result == -1: el error ya se mostro en consola
-    }
 }
