@@ -155,12 +155,11 @@ Idiomas/  (raiz del repo emerytheec/Idiomas)
 |   |-- LocalizationManagerEditor.cs      # Inspector: validacion, preview, wire dropdown
 |   |-- AutoTranslateWindow.cs            # Ventana: MyMemory API
 |   |-- CsvExportImportWindow.cs          # Ventana: CSV export/import (Tools > Idiomas)
+|   |-- IdiomasLanguages.cs               # Definiciones centralizadas de idiomas
+|   |-- IdiomasEditorUtils.cs             # Utilidades compartidas (JSON, canvas ID)
 |   +-- IdiomasPrefabCreator.cs           # Menus de creacion
 |-- Data/
-|   |-- translation.json                  # Traducciones (11 idiomas)
-|   |-- NotoSansKR SDF.asset              # Font: coreano + cirilico
-|   |-- NotoSansJP SDF.asset              # Font: japones + chino
-|   +-- translation_characters.txt        # Caracteres para generar fonts SDF
+|   +-- translation.json                  # Traducciones (11 idiomas)
 |-- Prefabs/
 |   +-- LocalizationManager.prefab        # Prefab listo para usar
 |-- .github/workflows/release.yml         # Workflow de release automatico
@@ -214,19 +213,24 @@ Cache en `_currentLangDict` y `_fallbackLangDict`.
 
 ## Idiomas Soportados
 
-| Codigo | Idioma | Font Fallback |
-|--------|--------|---------------|
-| `en` | English | No |
-| `es` | Espanol | No |
-| `ja` | Japanese | NotoSansJP SDF |
-| `ko` | Korean | NotoSansKR SDF |
-| `zh-CN` | Chinese Simplified | NotoSansJP SDF |
-| `zh-TW` | Chinese Traditional | NotoSansJP SDF |
-| `ru` | Russian | NotoSansKR SDF |
-| `pt-BR` | Portuguese | No |
-| `fr` | French | No |
-| `de` | German | No |
-| `ca` | Catalan | No |
+| Codigo | Idioma | Fuentes CJK |
+|--------|--------|-------------|
+| `en` | English | No necesita |
+| `es` | Espanol | No necesita |
+| `ja` | Japanese | VRChat Noto Sans (runtime) |
+| `ko` | Korean | VRChat Noto Sans (runtime) |
+| `zh-CN` | Chinese Simplified | VRChat Noto Sans (runtime) |
+| `zh-TW` | Chinese Traditional | VRChat Noto Sans (runtime) |
+| `ru` | Russian | VRChat Noto Sans (runtime) |
+| `pt-BR` | Portuguese | No necesita |
+| `fr` | French | No necesita |
+| `de` | German | No necesita |
+| `ca` | Catalan | No necesita |
+
+**Nota sobre fuentes:** Los caracteres CJK y cirilicos se renderizan con las fuentes
+internas del cliente de VRChat (Noto Sans). No se incluyen fuentes SDF propias.
+Para que funcione, la lista de Fallback Font Assets en TMP Settings debe estar vacia.
+En el editor de Unity los caracteres CJK se ven como cuadrados — esto es normal.
 
 ---
 

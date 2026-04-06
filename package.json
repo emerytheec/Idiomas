@@ -3,7 +3,7 @@
     "displayName": "Idiomas - VRChat Localization",
     "version": "1.0.0",
     "unity": "2022.3",
-    "description": "Standalone localization system for VRChat worlds. Translates Canvas UI to 11 languages with auto-detection, dropdown selector, CJK/Cyrillic font support, and MyMemory auto-translate.",
+    "description": "Standalone localization system for VRChat worlds. Translates Canvas UI to 11 languages with auto-detection, dropdown selector, and MyMemory auto-translate. CJK/Cyrillic characters rendered via VRChat built-in fonts.",
     "author": {
         "name": "Bender_Dios",
         "url": "https://github.com/emerytheec"

@@ -13,32 +13,21 @@ Traduce automaticamente todos los textos de un Canvas a multiples idiomas.
 
 Copia la carpeta `Assets/Idiomas/` completa a tu proyecto de Unity.
 
-### Paso 2: Configurar fuentes (IMPORTANTE)
+### Paso 2: Fuentes CJK (japones, coreano, chino, ruso)
 
 El sistema soporta 11 idiomas incluyendo japones, chino, coreano y ruso.
-Para que estos caracteres se muestren correctamente, necesitas configurar
-fuentes de respaldo (fallback) en TextMeshPro.
+Estos caracteres se renderizan automaticamente con las fuentes internas
+del cliente de VRChat (Noto Sans CJK) en runtime.
 
-1. En la carpeta `Assets/Idiomas/Data/` encontraras estos font assets:
-   - `NotoSansKR SDF` (coreano + cirilico + latin + algo de CJK)
-   - `NotoSansJP SDF` (japones + chino)
+**No necesitas configurar fuentes adicionales.**
 
-2. En el **Project**, navega a `Assets/TextMesh Pro/Resources/`
+Para que las fuentes de VRChat funcionen, la lista de **Fallback Font Assets**
+en TMP Settings (`Edit > Project Settings > TextMeshPro Settings`) debe estar
+**vacia**. Si hay fuentes custom ahi, VRChat las usa en vez de las suyas.
 
-3. Haz clic en **TMP Settings**
-
-4. En el Inspector, busca **Fallback Font Assets** (dice Size 0)
-
-5. Cambia Size de `0` a `2`
-
-6. Arrastra los fonts:
-   - Element 0: `NotoSansKR SDF`
-   - Element 1: `NotoSansJP SDF`
-
-7. **Ctrl+S** para guardar
-
-Sin este paso, los idiomas como japones, chino, coreano y ruso mostraran
-cuadraditos en vez de caracteres.
+**Nota:** En el editor de Unity (Play mode local), los caracteres CJK pueden
+aparecer como cuadrados. Esto es normal — al subir el mundo a VRChat se
+renderizan correctamente.
 
 ### Paso 3: Agregar el prefab a tu escena
 
@@ -218,10 +207,7 @@ Assets/Idiomas/
 │   ├── AutoTranslateWindow.cs         # Ventana de auto-traduccion
 │   └── IdiomasPrefabCreator.cs        # Creador de demos
 ├── Data/
-│   ├── translation.json               # Traducciones (se crea automatico)
-│   ├── NotoSansKR SDF.asset           # Font fallback (coreano/cirilico)
-│   ├── NotoSansJP SDF.asset           # Font fallback (japones/chino)
-│   └── translation_characters.txt     # Caracteres para generar fonts
+│   └── translation.json               # Traducciones (se crea automatico)
 ├── Prefabs/
 │   └── LocalizationManager.prefab     # Prefab listo para usar
 └── README.md
