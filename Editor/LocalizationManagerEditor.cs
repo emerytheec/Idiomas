@@ -10,6 +10,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using VRC.SDK3.Data;
 using VRC.Udon;
+using BenderDios.Idiomas;
 
 /// <summary>
 /// Inspector personalizado para LocalizationManager.

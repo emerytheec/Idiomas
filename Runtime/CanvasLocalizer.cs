@@ -4,6 +4,8 @@ using UnityEngine.UI;
 using TMPro;
 using VRC.SDKBase;
 
+namespace BenderDios.Idiomas
+{
 /// <summary>
 /// Localiza automaticamente TODOS los textos de un Canvas completo.
 /// Se coloca en el GameObject raiz del Canvas (o cualquier nivel alto de la jerarquia).
@@ -173,4 +175,5 @@ public class CanvasLocalizer : UdonSharpBehaviour
         if (legacyTexts != null) count += legacyTexts.Length;
         return count;
     }
+}
 }

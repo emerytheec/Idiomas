@@ -9,10 +9,10 @@ using System.Text.RegularExpressions;
 
 /// <summary>
 /// Ventana de Editor para auto-traducir las claves faltantes del JSON de traducciones.
-/// Usa la API gratuita MyMemory (https://mymemory.translated.net/).
+/// Usa APIs gratuitas: MyMemory (principal) y Lingva Translate (fallback).
 ///
 /// Limites de MyMemory (sin API key):
-///   - 5000 palabras por dia
+///   - 5000 caracteres por dia (anonimo)
 ///   - Sin registro requerido
 ///   - Soporta todos los idiomas comunes
 ///
@@ -49,11 +49,9 @@ public class AutoTranslateWindow : EditorWindow
         { "pt-BR", "pt" }, { "fr", "fr" }, { "de", "de" }, { "ca", "ca" }
     };
 
-    // Instancias de Lingva (fallback si la principal cae)
+    // Instancias de Lingva (fallback, la mayoria de instancias publicas estan caidas)
     private static readonly string[] LINGVA_HOSTS = {
         "lingva.ml",
-        "translate.plausibility.cloud",
-        "lingva.garudalinux.org",
     };
 
     // =====================================================================
@@ -206,7 +204,7 @@ public class AutoTranslateWindow : EditorWindow
         // --- Cabecera ---
         EditorGUILayout.Space(5);
         EditorGUILayout.LabelField("Auto-Traducir Idiomas", EditorStyles.boldLabel);
-        EditorGUILayout.LabelField("APIs: Lingva > MyMemory > SimplyTranslate (gratis, sin registro)",
+        EditorGUILayout.LabelField("APIs: MyMemory > Lingva (gratis, sin registro)",
             EditorStyles.miniLabel);
         EditorGUILayout.Space(5);
 
@@ -388,7 +386,7 @@ public class AutoTranslateWindow : EditorWindow
     }
 
     /// <summary>
-    /// Traduce un texto usando cadena de fallback: Lingva -> MyMemory -> SimplyTranslate.
+    /// Traduce un texto usando cadena de fallback: MyMemory -> Lingva.
     /// Protege bloques de rich text con contenido tecnico antes de traducir.
     /// Retorna null solo si TODAS las APIs fallan.
     /// </summary>
@@ -425,11 +423,19 @@ public class AutoTranslateWindow : EditorWindow
     }
 
     /// <summary>
-    /// Cadena de fallback: Lingva -> MyMemory -> SimplyTranslate.
+    /// Cadena de fallback: MyMemory -> Lingva.
+    /// MyMemory es la API principal (estable, gratuita, sin registro).
+    /// Lingva es fallback (pocas instancias publicas activas).
     /// </summary>
     private string TranslateWithFallback(string text, string fromLang, string toLang)
     {
-        // 1. Lingva Translate (prueba varias instancias)
+        // 1. MyMemory (API principal, la mas estable)
+        string mmFrom = GetCode(MYMEMORY_CODES, fromLang);
+        string mmTo = GetCode(MYMEMORY_CODES, toLang);
+        string mmResult = TryMyMemory(text, mmFrom, mmTo);
+        if (mmResult != null) return mmResult;
+
+        // 2. Lingva Translate (fallback)
         string lingvaFrom = GetCode(LINGVA_CODES, fromLang);
         string lingvaTo = GetCode(LINGVA_CODES, toLang);
         for (int h = 0; h < LINGVA_HOSTS.Length; h++)
@@ -437,16 +443,6 @@ public class AutoTranslateWindow : EditorWindow
             string result = TryLingva(LINGVA_HOSTS[h], text, lingvaFrom, lingvaTo);
             if (result != null) return result;
         }
-
-        // 2. MyMemory
-        string mmFrom = GetCode(MYMEMORY_CODES, fromLang);
-        string mmTo = GetCode(MYMEMORY_CODES, toLang);
-        string mmResult = TryMyMemory(text, mmFrom, mmTo);
-        if (mmResult != null) return mmResult;
-
-        // 3. SimplyTranslate
-        string stResult = TrySimplyTranslate(text, fromLang, toLang);
-        if (stResult != null) return stResult;
 
         Debug.LogWarning($"[AutoTranslate] Todas las APIs fallaron para '{text}' ({fromLang}→{toLang})");
         return null;
@@ -554,7 +550,7 @@ public class AutoTranslateWindow : EditorWindow
     }
 
     // =====================================================================
-    // API 1: Lingva Translate
+    // API 2: Lingva Translate (fallback)
     // =====================================================================
 
     private string TryLingva(string host, string text, string fromLang, string toLang)
@@ -580,7 +576,7 @@ public class AutoTranslateWindow : EditorWindow
     }
 
     // =====================================================================
-    // API 2: MyMemory
+    // API 1: MyMemory (principal)
     // =====================================================================
 
     private string TryMyMemory(string text, string fromLang, string toLang)
@@ -605,32 +601,6 @@ public class AutoTranslateWindow : EditorWindow
         return null;
     }
 
-    // =====================================================================
-    // API 3: SimplyTranslate
-    // =====================================================================
-
-    private string TrySimplyTranslate(string text, string fromLang, string toLang)
-    {
-        try
-        {
-            string encoded = Uri.EscapeDataString(text);
-            string url = $"https://simplytranslate.org/api/translate/" +
-                         $"?engine=google&from={fromLang}&to={toLang}&text={encoded}";
-
-            string json = HttpGet(url);
-            if (json == null) return null;
-
-            // Respuesta: {"translated_text":"texto",...}
-            Match match = Regex.Match(json, "\"translated_text\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
-            if (match.Success)
-                return DecodeJsonString(match.Groups[1].Value);
-        }
-        catch (Exception e)
-        {
-            Debug.Log($"[AutoTranslate] SimplyTranslate fallo: {e.Message}");
-        }
-        return null;
-    }
 
     // =====================================================================
     // HTTP y utilidades

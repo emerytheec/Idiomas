@@ -1,5 +1,6 @@
 using UnityEditor;
 using UnityEngine;
+using BenderDios.Idiomas;
 
 /// <summary>
 /// Dibuja un label en el Scene View para cada CanvasLocalizer,

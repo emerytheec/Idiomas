@@ -4,27 +4,29 @@ using UnityEngine;
 using VRC.SDK3.Data;
 using VRC.SDKBase;
 
-/// <summary>
-/// Sistema de localizacion standalone para VRChat.
-/// Carga un JSON de traducciones, detecta el idioma del jugador automaticamente,
-/// y notifica a todos los TextLocalizer registrados cuando cambia el idioma.
-///
-/// Uso:
-///   1. Colocar este componente en un GameObject de la escena.
-///   2. Asignar el TextAsset con el JSON de traducciones.
-///   3. Registrar los TextLocalizer en el array 'localizers' (o usar el boton del Editor).
-///
-/// Formato del JSON:
-///   {
-///     "en": { "clave": "valor", ... },
-///     "es": { "clave": "valor", ... },
-///     "ja": { "clave": "valor", ... }
-///   }
-///
-/// Independiente de YamaPlayer. No requiere Controller, UIController, ni ningun otro sistema.
-/// </summary>
-[UdonBehaviourSyncMode(BehaviourSyncMode.None)]
-public class LocalizationManager : UdonSharpBehaviour
+namespace BenderDios.Idiomas
+{
+    /// <summary>
+    /// Sistema de localizacion standalone para VRChat.
+    /// Carga un JSON de traducciones, detecta el idioma del jugador automaticamente,
+    /// y notifica a todos los TextLocalizer registrados cuando cambia el idioma.
+    ///
+    /// Uso:
+    ///   1. Colocar este componente en un GameObject de la escena.
+    ///   2. Asignar el TextAsset con el JSON de traducciones.
+    ///   3. Registrar los TextLocalizer en el array 'localizers' (o usar el boton del Editor).
+    ///
+    /// Formato del JSON:
+    ///   {
+    ///     "en": { "clave": "valor", ... },
+    ///     "es": { "clave": "valor", ... },
+    ///     "ja": { "clave": "valor", ... }
+    ///   }
+    ///
+    /// Independiente de YamaPlayer. No requiere Controller, UIController, ni ningun otro sistema.
+    /// </summary>
+    [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
+    public class LocalizationManager : UdonSharpBehaviour
 {
     // =====================================================================
     // Configuracion (Inspector)
@@ -902,4 +904,5 @@ public class LocalizationManager : UdonSharpBehaviour
         // Aplicar idioma actual al nuevo canvas localizer
         canvasLocalizer.UpdateAllTexts();
     }
+}
 }

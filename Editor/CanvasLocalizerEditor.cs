@@ -8,6 +8,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.IO;
 using VRC.SDK3.Data;
+using BenderDios.Idiomas;
 
 /// <summary>
 /// Inspector personalizado para CanvasLocalizer.

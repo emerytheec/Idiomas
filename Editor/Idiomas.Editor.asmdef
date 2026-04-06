@@ -1,6 +1,6 @@
 {
     "name": "Idiomas.Editor",
-    "rootNamespace": "",
+    "rootNamespace": "BenderDios.Idiomas.Editor",
     "references": [
         "GUID:82c0cbc123233db4aa6af1217e17c784",
         "GUID:99835874ee819da44948776e0df4ff1d",

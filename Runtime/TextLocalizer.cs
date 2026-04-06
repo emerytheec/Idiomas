@@ -4,6 +4,8 @@ using UnityEngine.UI;
 using TMPro;
 using VRC.SDKBase;
 
+namespace BenderDios.Idiomas
+{
 /// <summary>
 /// Componente de localizacion que se coloca en un GameObject con Text o TextMeshProUGUI.
 /// Lee la traduccion de su 'translationKey' desde el LocalizationManager y la aplica al texto.
@@ -223,4 +225,5 @@ public class TextLocalizer : UdonSharpBehaviour
         _param2 = param2 != null ? param2 : "";
         UpdateText();
     }
+}
 }

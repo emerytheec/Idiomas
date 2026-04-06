@@ -1,6 +1,6 @@
 {
     "name": "Idiomas.Runtime",
-    "rootNamespace": "",
+    "rootNamespace": "BenderDios.Idiomas",
     "references": [
         "GUID:99835874ee819da44948776e0df4ff1d",
         "GUID:3456780c4fb2d324ab9c633d6f1b0ddb",

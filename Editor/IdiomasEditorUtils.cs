@@ -6,6 +6,7 @@ using VRC.Udon;
 using VRC.SDK3.Data;
 using System.Collections.Generic;
 using System.Text;
+using BenderDios.Idiomas;
 
 /// <summary>
 /// Utilidades compartidas para los editor scripts del sistema Idiomas.

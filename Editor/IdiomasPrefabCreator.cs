@@ -6,6 +6,7 @@ using UdonSharp;
 using UdonSharpEditor;
 using VRC.Udon;
 using System.Collections.Generic;
+using BenderDios.Idiomas;
 
 /// <summary>
 /// Herramienta de Editor para crear componentes de demostracion del sistema de Idiomas.
