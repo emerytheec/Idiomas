@@ -21,6 +21,7 @@ using VRC.SDK3.Data;
 /// </summary>
 public class CsvExportImportWindow : EditorWindow
 {
+    private static string S(string key) => IdiomasEditorStrings.Get(key);
     private string _jsonPath;
     private string _statusMessage = "";
     private Vector2 _scrollPos;
@@ -29,7 +30,7 @@ public class CsvExportImportWindow : EditorWindow
     public static void OpenWindow()
     {
         CsvExportImportWindow window = GetWindow<CsvExportImportWindow>(
-            true, "Idiomas - CSV Export/Import", true);
+            true, S("csv_window_title"), true);
         window.minSize = new Vector2(450, 350);
         window.FindJsonPath();
         window.Show();
@@ -64,38 +65,35 @@ public class CsvExportImportWindow : EditorWindow
         _scrollPos = EditorGUILayout.BeginScrollView(_scrollPos);
 
         EditorGUILayout.Space(5);
-        EditorGUILayout.LabelField("Exportar / Importar CSV", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField(S("csv_title"), EditorStyles.boldLabel);
         EditorGUILayout.LabelField(
-            "Permite compartir traducciones con traductores via Google Sheets, Excel, etc.",
+            S("csv_desc"),
             EditorStyles.miniLabel);
         EditorGUILayout.Space(8);
 
         // --- Archivo JSON ---
-        EditorGUILayout.LabelField("Archivo JSON:", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField(S("csv_json_file"), EditorStyles.boldLabel);
         EditorGUILayout.LabelField(
-            string.IsNullOrEmpty(_jsonPath) ? "(no encontrado)" : Path.GetFileName(_jsonPath),
+            string.IsNullOrEmpty(_jsonPath) ? S("csv_not_found") : Path.GetFileName(_jsonPath),
             EditorStyles.helpBox);
 
         if (string.IsNullOrEmpty(_jsonPath) || !File.Exists(_jsonPath))
         {
-            EditorGUILayout.HelpBox(
-                "No se encontro translation.json.\n" +
-                "Exporta primero desde un CanvasLocalizer.", MessageType.Warning);
+            EditorGUILayout.HelpBox(S("csv_no_json_warning"), MessageType.Warning);
         }
 
         EditorGUILayout.Space(10);
 
         // === EXPORTAR ===
-        EditorGUILayout.LabelField("Exportar a CSV", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField(S("csv_export_title"), EditorStyles.boldLabel);
         EditorGUILayout.LabelField(
-            "Genera un archivo CSV con todas las traducciones.\n" +
-            "Formato: key, en, es, ja, ko, ... (una fila por clave, una columna por idioma).",
+            S("csv_export_desc"),
             EditorStyles.wordWrappedMiniLabel);
         EditorGUILayout.Space(3);
 
         EditorGUI.BeginDisabledGroup(string.IsNullOrEmpty(_jsonPath) || !File.Exists(_jsonPath));
         GUI.backgroundColor = new Color(0.3f, 0.7f, 1f);
-        if (GUILayout.Button("Exportar JSON a CSV", GUILayout.Height(28)))
+        if (GUILayout.Button(S("csv_export_btn"), GUILayout.Height(28)))
         {
             ExportCsv();
         }
@@ -105,15 +103,14 @@ public class CsvExportImportWindow : EditorWindow
         EditorGUILayout.Space(12);
 
         // === IMPORTAR ===
-        EditorGUILayout.LabelField("Importar desde CSV", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField(S("csv_import_title"), EditorStyles.boldLabel);
         EditorGUILayout.LabelField(
-            "Lee un archivo CSV y lo fusiona con el JSON existente.\n" +
-            "Las traducciones nuevas se agregan, las existentes se actualizan.",
+            S("csv_import_desc"),
             EditorStyles.wordWrappedMiniLabel);
         EditorGUILayout.Space(3);
 
         GUI.backgroundColor = new Color(0.2f, 0.8f, 0.3f);
-        if (GUILayout.Button("Importar CSV al JSON", GUILayout.Height(28)))
+        if (GUILayout.Button(S("csv_import_btn"), GUILayout.Height(28)))
         {
             ImportCsv();
         }
@@ -139,7 +136,7 @@ public class CsvExportImportWindow : EditorWindow
         if (!VRCJson.TryDeserializeFromJson(json, out DataToken data) ||
             data.TokenType != TokenType.DataDictionary)
         {
-            _statusMessage = "Error al parsear el JSON.";
+            _statusMessage = S("error_parse_json");
             return;
         }
 
@@ -201,13 +198,13 @@ public class CsvExportImportWindow : EditorWindow
         string csvDir = Path.GetDirectoryName(_jsonPath);
 
         string savePath = EditorUtility.SaveFilePanel(
-            "Guardar CSV", csvDir, "translation", "csv");
+            S("csv_save_dialog"), csvDir, "translation", "csv");
         if (string.IsNullOrEmpty(savePath)) return;
 
         File.WriteAllText(savePath, sb.ToString(), Encoding.UTF8);
         AssetDatabase.Refresh();
 
-        _statusMessage = $"Exportado: {allKeys.Count} claves x {languages.Count} idiomas a {Path.GetFileName(savePath)}";
+        _statusMessage = string.Format(S("csv_exported"), allKeys.Count, languages.Count, Path.GetFileName(savePath));
         Debug.Log($"[Idiomas CSV] {_statusMessage}");
     }
 
@@ -217,13 +214,13 @@ public class CsvExportImportWindow : EditorWindow
 
     private void ImportCsv()
     {
-        string csvPath = EditorUtility.OpenFilePanel("Abrir CSV", "", "csv");
+        string csvPath = EditorUtility.OpenFilePanel(S("csv_open_dialog"), "", "csv");
         if (string.IsNullOrEmpty(csvPath)) return;
 
         string[] lines = File.ReadAllLines(csvPath, Encoding.UTF8);
         if (lines.Length < 2)
         {
-            _statusMessage = "El CSV esta vacio o solo tiene cabecera.";
+            _statusMessage = S("csv_empty");
             return;
         }
 
@@ -231,7 +228,7 @@ public class CsvExportImportWindow : EditorWindow
         string[] header = ParseCsvLine(lines[0]);
         if (header.Length < 2 || header[0].Trim().ToLower() != "key")
         {
-            _statusMessage = "El CSV debe tener 'key' como primera columna.";
+            _statusMessage = S("csv_bad_header");
             return;
         }
 
@@ -291,13 +288,12 @@ public class CsvExportImportWindow : EditorWindow
         File.WriteAllText(_jsonPath, newJson, Encoding.UTF8);
         AssetDatabase.Refresh();
 
-        _statusMessage = $"Importado: {imported} traducciones desde {Path.GetFileName(csvPath)}";
+        _statusMessage = string.Format(S("csv_imported"), imported, Path.GetFileName(csvPath));
         Debug.Log($"[Idiomas CSV] {_statusMessage}");
 
-        EditorUtility.DisplayDialog("Importacion Completa",
-            $"Se importaron {imported} traducciones.\n" +
-            $"Idiomas: {string.Join(", ", languages)}\n" +
-            $"Filas procesadas: {lines.Length - 1}", "OK");
+        EditorUtility.DisplayDialog(S("csv_import_done_title"),
+            string.Format(S("csv_import_done_msg"), imported, string.Join(", ", languages), lines.Length - 1),
+            S("ok"));
     }
 
     // =====================================================================

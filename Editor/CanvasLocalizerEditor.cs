@@ -50,6 +50,8 @@ public class CanvasLocalizerEditor : Editor
     private bool _hasScanResults;
     private string _searchFilter = "";
 
+    private static string S(string key) => IdiomasEditorStrings.Get(key);
+
     /// <summary>
     /// Resultado de escaneo para un solo componente de texto.
     /// </summary>
@@ -257,18 +259,17 @@ public class CanvasLocalizerEditor : Editor
 
         // --- Titulo ---
         EditorGUILayout.Space(5);
-        EditorGUILayout.LabelField("Canvas Localizer", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField(S("cl_title"), EditorStyles.boldLabel);
         EditorGUILayout.LabelField(
-            "Localiza automaticamente todos los textos de un Canvas",
+            S("cl_subtitle"),
             EditorStyles.miniLabel);
         EditorGUILayout.Space(5);
 
         // --- Configuracion basica ---
         EditorGUILayout.PropertyField(_manager,
-            new GUIContent("LocalizationManager", "El manager central de idiomas de la escena."));
+            new GUIContent(S("cl_manager"), S("cl_manager_tooltip")));
         EditorGUILayout.PropertyField(_canvasId,
-            new GUIContent("ID del Canvas",
-                "Prefijo unico para las claves. Ej: 'settings', 'lobby', 'hud'."));
+            new GUIContent(S("cl_canvas_id"), S("cl_canvas_id_tooltip")));
 
         // --- Idioma Base como dropdown ---
         DrawBaseLanguageDropdown();
@@ -278,8 +279,7 @@ public class CanvasLocalizerEditor : Editor
         if (string.IsNullOrEmpty(canvasId))
         {
             EditorGUILayout.HelpBox(
-                "Configura un 'ID del Canvas' antes de escanear.\n" +
-                "Ejemplo: 'settings', 'main_menu', 'hud'.",
+                S("cl_no_id_warning"),
                 MessageType.Warning);
         }
         else
@@ -289,8 +289,7 @@ public class CanvasLocalizerEditor : Editor
             if (duplicateOwner != null)
             {
                 EditorGUILayout.HelpBox(
-                    $"El ID '{canvasId}' ya esta en uso por '{duplicateOwner}'.\n" +
-                    "Usa un ID unico para evitar sobreescribir traducciones.",
+                    string.Format(S("cl_duplicate_id"), canvasId, duplicateOwner),
                     MessageType.Error);
             }
         }
@@ -304,13 +303,13 @@ public class CanvasLocalizerEditor : Editor
         if (total > 0)
         {
             EditorGUILayout.LabelField(
-                $"Textos configurados: {tmpCount} TMP + {legacyCount} Legacy = {total} total",
+                string.Format(S("cl_texts_configured"), tmpCount, legacyCount, total),
                 EditorStyles.helpBox);
         }
         else
         {
             EditorGUILayout.LabelField(
-                "Sin textos configurados. Usa 'Escanear Canvas' para empezar.",
+                S("cl_no_texts"),
                 EditorStyles.helpBox);
         }
 
@@ -320,7 +319,7 @@ public class CanvasLocalizerEditor : Editor
         EditorGUI.BeginDisabledGroup(string.IsNullOrEmpty(canvasId));
 
         GUI.backgroundColor = new Color(0.3f, 0.7f, 1f);
-        if (GUILayout.Button("Escanear Canvas", GUILayout.Height(32)))
+        if (GUILayout.Button(S("cl_scan"), GUILayout.Height(32)))
         {
             ScanCanvas();
         }
@@ -337,8 +336,7 @@ public class CanvasLocalizerEditor : Editor
         {
             EditorGUILayout.Space(5);
             EditorGUILayout.HelpBox(
-                "No se encontraron textos en los hijos de este GameObject.\n" +
-                "Verifica que el canvas tiene componentes Text o TextMeshProUGUI.",
+                S("cl_no_scan_results"),
                 MessageType.Info);
         }
 
@@ -369,8 +367,7 @@ public class CanvasLocalizerEditor : Editor
         }
 
         int newIndex = EditorGUILayout.Popup(
-            new GUIContent("Idioma Base",
-                "Idioma en que estan escritos los textos actuales del canvas."),
+            new GUIContent(S("cl_base_language"), S("cl_base_language_tooltip")),
             selectedIndex, BASE_LANG_LABELS);
 
         if (newIndex >= 0 && newIndex != selectedIndex)
@@ -606,22 +603,19 @@ public class CanvasLocalizerEditor : Editor
         }
 
         EditorGUILayout.LabelField(
-            $"Resultados del Escaneo: {totalCount} textos",
+            string.Format(S("cl_scan_results"), totalCount),
             EditorStyles.boldLabel);
         EditorGUILayout.LabelField(
-            $"Incluidos: {totalCount - excludedCount}  |  " +
-            $"Ya en JSON: {existingCount}  |  " +
-            $"Nuevos: {newCount}  |  " +
-            $"Excluidos: {excludedCount}",
+            string.Format(S("cl_scan_summary"), totalCount - excludedCount, existingCount, newCount, excludedCount),
             EditorStyles.miniLabel);
 
         // --- Leyenda de colores ---
         EditorGUILayout.Space(2);
         EditorGUILayout.BeginHorizontal();
-        DrawColorLegend(new Color(0.3f, 0.7f, 0.3f, 1f), "En JSON");
-        DrawColorLegend(new Color(1f, 0.85f, 0.2f, 1f), "Nuevo");
-        DrawColorLegend(new Color(0.5f, 0.5f, 0.5f, 1f), "Excluido");
-        DrawColorLegend(new Color(1f, 0.2f, 0.2f, 1f), "Duplicada");
+        DrawColorLegend(new Color(0.3f, 0.7f, 0.3f, 1f), S("cl_legend_in_json"));
+        DrawColorLegend(new Color(1f, 0.85f, 0.2f, 1f), S("cl_legend_new"));
+        DrawColorLegend(new Color(0.5f, 0.5f, 0.5f, 1f), S("cl_legend_excluded"));
+        DrawColorLegend(new Color(1f, 0.2f, 0.2f, 1f), S("cl_legend_duplicate"));
         EditorGUILayout.EndHorizontal();
 
         EditorGUILayout.Space(3);
@@ -643,13 +637,13 @@ public class CanvasLocalizerEditor : Editor
         if (duplicateKeys.Count > 0)
         {
             EditorGUILayout.HelpBox(
-                $"Hay {duplicateKeys.Count} clave(s) duplicada(s). Corrigelas antes de exportar.",
+                string.Format(S("cl_duplicate_warning"), duplicateKeys.Count),
                 MessageType.Error);
         }
 
         // --- Botones incluir/excluir todos + filtro ---
         EditorGUILayout.BeginHorizontal();
-        if (GUILayout.Button("Incluir todos", EditorStyles.miniButton, GUILayout.Width(85)))
+        if (GUILayout.Button(S("cl_include_all"), EditorStyles.miniButton, GUILayout.Width(85)))
         {
             for (int i = 0; i < _scanResults.Count; i++)
             {
@@ -658,7 +652,7 @@ public class CanvasLocalizerEditor : Editor
                 _scanResults[i] = e;
             }
         }
-        if (GUILayout.Button("Excluir todos", EditorStyles.miniButton, GUILayout.Width(85)))
+        if (GUILayout.Button(S("cl_exclude_all"), EditorStyles.miniButton, GUILayout.Width(85)))
         {
             for (int i = 0; i < _scanResults.Count; i++)
             {
@@ -668,7 +662,7 @@ public class CanvasLocalizerEditor : Editor
             }
         }
         GUILayout.FlexibleSpace();
-        EditorGUILayout.LabelField("Filtrar:", GUILayout.Width(42));
+        EditorGUILayout.LabelField(S("cl_filter"), GUILayout.Width(42));
         _searchFilter = EditorGUILayout.TextField(_searchFilter, GUILayout.MinWidth(60));
         if (!string.IsNullOrEmpty(_searchFilter))
         {
@@ -685,10 +679,10 @@ public class CanvasLocalizerEditor : Editor
 
         // --- Cabecera de tabla ---
         EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
-        GUILayout.Label("Incl.", EditorStyles.miniLabel, GUILayout.Width(32));
-        GUILayout.Label("Clave de Traduccion", EditorStyles.miniLabel, GUILayout.MinWidth(120));
-        GUILayout.Label("Texto Actual", EditorStyles.miniLabel, GUILayout.MinWidth(100));
-        GUILayout.Label("Ruta", EditorStyles.miniLabel, GUILayout.Width(140));
+        GUILayout.Label(S("cl_col_include"), EditorStyles.miniLabel, GUILayout.Width(32));
+        GUILayout.Label(S("cl_col_key"), EditorStyles.miniLabel, GUILayout.MinWidth(120));
+        GUILayout.Label(S("cl_col_text"), EditorStyles.miniLabel, GUILayout.MinWidth(100));
+        GUILayout.Label(S("cl_col_path"), EditorStyles.miniLabel, GUILayout.Width(140));
         GUILayout.Label("", GUILayout.Width(20)); // Columna ping
         EditorGUILayout.EndHorizontal();
 
@@ -762,7 +756,7 @@ public class CanvasLocalizerEditor : Editor
             if (entry.component != null)
             {
                 if (GUILayout.Button(
-                    new GUIContent("\u25CE", "Seleccionar en la jerarquia"),
+                    new GUIContent("\u25CE", S("cl_ping_tooltip")),
                     EditorStyles.miniButton, GUILayout.Width(20)))
                 {
                     EditorGUIUtility.PingObject(entry.component.gameObject);
@@ -787,7 +781,7 @@ public class CanvasLocalizerEditor : Editor
         EditorGUI.BeginDisabledGroup(duplicateKeys.Count > 0);
 
         GUI.backgroundColor = new Color(0.2f, 0.8f, 0.3f);
-        if (GUILayout.Button("Exportar al JSON y Aplicar", GUILayout.Height(30)))
+        if (GUILayout.Button(S("cl_export_btn"), GUILayout.Height(30)))
         {
             ExportToJsonAndApply();
         }
@@ -817,8 +811,8 @@ public class CanvasLocalizerEditor : Editor
     {
         if (_scanResults == null || _scanResults.Count == 0)
         {
-            EditorUtility.DisplayDialog("Sin Resultados",
-                "No hay resultados de escaneo. Pulsa 'Escanear Canvas' primero.", "OK");
+            EditorUtility.DisplayDialog(S("cl_no_results_title"),
+                S("cl_no_results_msg"), S("ok"));
             return;
         }
 
@@ -826,17 +820,16 @@ public class CanvasLocalizerEditor : Editor
         Object managerObj = _manager.objectReferenceValue;
         if (managerObj == null)
         {
-            EditorUtility.DisplayDialog("Error",
-                "No hay LocalizationManager asignado.\n" +
-                "Asigna uno en el campo 'LocalizationManager'.", "OK");
+            EditorUtility.DisplayDialog(S("error_title"),
+                S("cl_no_manager_msg"), S("ok"));
             return;
         }
 
         string baseLang = _baseLanguage.stringValue;
         if (string.IsNullOrEmpty(baseLang))
         {
-            EditorUtility.DisplayDialog("Error",
-                "El 'Idioma Base' esta vacio. Configuralo antes de exportar.", "OK");
+            EditorUtility.DisplayDialog(S("error_title"),
+                S("cl_no_base_lang_msg"), S("ok"));
             return;
         }
 
@@ -930,30 +923,30 @@ public class CanvasLocalizerEditor : Editor
         if (newKeys.Count > 0 || updatedKeys.Count > 0)
         {
             StringBuilder preview = new StringBuilder();
-            preview.AppendLine($"Idioma base: '{baseLang}'");
-            preview.AppendLine($"Archivo: {assetPath}\n");
+            preview.AppendLine(string.Format(S("cl_export_base_lang"), baseLang));
+            preview.AppendLine(string.Format(S("cl_export_file"), assetPath) + "\n");
 
             if (newKeys.Count > 0)
             {
-                preview.AppendLine($"--- Claves nuevas ({newKeys.Count}) ---");
+                preview.AppendLine(string.Format(S("cl_export_new_keys"), newKeys.Count));
                 for (int i = 0; i < newKeys.Count && i < 20; i++)
                     preview.AppendLine($"  + {newKeys[i]}");
                 if (newKeys.Count > 20)
-                    preview.AppendLine($"  ... y {newKeys.Count - 20} mas");
+                    preview.AppendLine(string.Format(S("cl_export_and_more"), newKeys.Count - 20));
                 preview.AppendLine();
             }
 
             if (updatedKeys.Count > 0)
             {
-                preview.AppendLine($"--- Claves actualizadas ({updatedKeys.Count}) ---");
+                preview.AppendLine(string.Format(S("cl_export_updated_keys"), updatedKeys.Count));
                 for (int i = 0; i < updatedKeys.Count && i < 20; i++)
                     preview.AppendLine($"  ~ {updatedKeys[i]}");
                 if (updatedKeys.Count > 20)
-                    preview.AppendLine($"  ... y {updatedKeys.Count - 20} mas");
+                    preview.AppendLine(string.Format(S("cl_export_and_more"), updatedKeys.Count - 20));
             }
 
-            if (!EditorUtility.DisplayDialog("Confirmar Exportacion",
-                preview.ToString(), "Exportar", "Cancelar"))
+            if (!EditorUtility.DisplayDialog(S("cl_confirm_export_title"),
+                preview.ToString(), S("cl_export_confirm"), S("cancel")))
             {
                 return;
             }

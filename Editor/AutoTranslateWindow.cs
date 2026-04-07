@@ -26,6 +26,7 @@ using System.Text.RegularExpressions;
 /// </summary>
 public class AutoTranslateWindow : EditorWindow
 {
+    private static string S(string key) => IdiomasEditorStrings.Get(key);
     // =====================================================================
     // Idiomas soportados
     // =====================================================================
@@ -81,7 +82,7 @@ public class AutoTranslateWindow : EditorWindow
     public static void Open(string jsonPath)
     {
         AutoTranslateWindow window = GetWindow<AutoTranslateWindow>(
-            true, "Auto-Traducir Idiomas", true);
+            true, S("at_window_title"), true);
         window.minSize = new Vector2(550, 600);
         window._jsonPath = jsonPath;
         window._hasResults = false;
@@ -103,7 +104,7 @@ public class AutoTranslateWindow : EditorWindow
         if (string.IsNullOrEmpty(_jsonPath) || !File.Exists(_jsonPath))
         {
             _translations = null;
-            _statusMessage = "No se encontro el archivo JSON.";
+            _statusMessage = S("at_no_json");
             return;
         }
 
@@ -112,7 +113,7 @@ public class AutoTranslateWindow : EditorWindow
 
         if (_translations == null)
         {
-            _statusMessage = "Error al parsear el JSON.";
+            _statusMessage = S("error_parse_json");
             return;
         }
 
@@ -132,7 +133,7 @@ public class AutoTranslateWindow : EditorWindow
             _targetChecked[i] = missing > 0;
         }
 
-        _statusMessage = $"JSON cargado: {_translations.Count} idioma(s), {_allKeys.Count} clave(s) totales.";
+        _statusMessage = string.Format(S("at_json_loaded"), _translations.Count, _allKeys.Count);
     }
 
     /// <summary>
@@ -194,7 +195,7 @@ public class AutoTranslateWindow : EditorWindow
         if (_translations == null)
         {
             EditorGUILayout.HelpBox(_statusMessage, MessageType.Error);
-            if (GUILayout.Button("Recargar"))
+            if (GUILayout.Button(S("at_reload_btn")))
                 LoadJson();
             return;
         }
@@ -203,28 +204,28 @@ public class AutoTranslateWindow : EditorWindow
 
         // --- Cabecera ---
         EditorGUILayout.Space(5);
-        EditorGUILayout.LabelField("Auto-Traducir Idiomas", EditorStyles.boldLabel);
-        EditorGUILayout.LabelField("APIs: MyMemory > Lingva (gratis, sin registro)",
+        EditorGUILayout.LabelField(S("at_title"), EditorStyles.boldLabel);
+        EditorGUILayout.LabelField(S("at_apis"),
             EditorStyles.miniLabel);
         EditorGUILayout.Space(5);
 
         // Archivo
-        EditorGUILayout.LabelField("Archivo:", Path.GetFileName(_jsonPath));
+        EditorGUILayout.LabelField(S("at_file"), Path.GetFileName(_jsonPath));
 
         // --- Resumen de claves por idioma ---
         EditorGUILayout.Space(5);
-        EditorGUILayout.LabelField("Estado del JSON", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField(S("at_json_status"), EditorStyles.boldLabel);
         EditorGUILayout.LabelField(
-            $"Claves totales: {_allKeys.Count} (distribuidas entre {_translations.Count} idioma(s))",
+            string.Format(S("at_total_keys"), _allKeys.Count, _translations.Count),
             EditorStyles.miniLabel);
         EditorGUILayout.LabelField(
-            "Cada clave se traduce desde el idioma que ya tiene su texto original.",
+            S("at_source_note"),
             EditorStyles.miniLabel);
 
         // --- Idiomas destino ---
         EditorGUILayout.Space(8);
-        EditorGUILayout.LabelField("Idiomas a Completar", EditorStyles.boldLabel);
-        EditorGUILayout.LabelField("Marca los idiomas a los que quieres traducir las claves faltantes.",
+        EditorGUILayout.LabelField(S("at_target_title"), EditorStyles.boldLabel);
+        EditorGUILayout.LabelField(S("at_target_desc"),
             EditorStyles.miniLabel);
         EditorGUILayout.Space(3);
 
@@ -238,11 +239,11 @@ public class AutoTranslateWindow : EditorWindow
 
             string label;
             if (missing == 0)
-                label = $"{langCode} — {LANG_NAMES[i]}  ({existing} claves, completo)";
+                label = $"{langCode} — {LANG_NAMES[i]}  ({existing} claves, {S("at_complete")})";
             else if (existing == 0)
-                label = $"{langCode} — {LANG_NAMES[i]}  (nuevo, {missing} por traducir)";
+                label = $"{langCode} — {LANG_NAMES[i]}  ({string.Format(S("at_new_lang"), missing)})";
             else
-                label = $"{langCode} — {LANG_NAMES[i]}  ({existing} existentes, {missing} faltan)";
+                label = $"{langCode} — {LANG_NAMES[i]}  ({string.Format(S("at_existing_missing"), existing, missing)})";
 
             EditorGUILayout.BeginHorizontal();
             _targetChecked[i] = EditorGUILayout.ToggleLeft(label, _targetChecked[i]);
@@ -252,14 +253,14 @@ public class AutoTranslateWindow : EditorWindow
         }
 
         EditorGUILayout.Space(5);
-        EditorGUILayout.LabelField($"Total a traducir: {totalMissingSelected} texto(s)",
+        EditorGUILayout.LabelField(string.Format(S("at_total"), totalMissingSelected),
             EditorStyles.helpBox);
 
         // --- Boton traducir ---
         EditorGUILayout.Space(8);
         EditorGUI.BeginDisabledGroup(totalMissingSelected == 0);
         GUI.backgroundColor = new Color(0.3f, 0.7f, 1f);
-        if (GUILayout.Button($"Traducir {totalMissingSelected} Texto(s) con MyMemory",
+        if (GUILayout.Button(string.Format(S("at_translate_btn"), totalMissingSelected),
             GUILayout.Height(32)))
         {
             RunTranslation();
@@ -333,13 +334,13 @@ public class AutoTranslateWindow : EditorWindow
                     processed++;
                     float progress = (float)processed / totalToTranslate;
                     bool cancel = EditorUtility.DisplayCancelableProgressBar(
-                        "Traduciendo...",
+                        S("at_translating"),
                         $"[{srcLang}→{tgtLang}] {key}: \"{sourceText}\" ({processed}/{totalToTranslate})",
                         progress);
 
                     if (cancel)
                     {
-                        _statusMessage = $"Cancelado. Traducidos: {_totalTranslated}, Errores: {_totalErrors}";
+                        _statusMessage = string.Format(S("at_cancelled"), _totalTranslated, _totalErrors);
                         _hasResults = _newTranslations.Count > 0;
                         EditorUtility.ClearProgressBar();
                         Repaint();
@@ -380,8 +381,7 @@ public class AutoTranslateWindow : EditorWindow
         }
 
         _hasResults = true;
-        _statusMessage = $"Completado. Traducidos: {_totalTranslated}, Errores: {_totalErrors}. " +
-                         "Revisa la vista previa y guarda.";
+        _statusMessage = string.Format(S("at_completed"), _totalTranslated, _totalErrors);
         Repaint();
     }
 
@@ -661,9 +661,9 @@ public class AutoTranslateWindow : EditorWindow
     private void DrawPreview()
     {
         EditorGUILayout.Space(8);
-        EditorGUILayout.LabelField("Vista Previa de Traducciones", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField(S("at_preview_title"), EditorStyles.boldLabel);
         EditorGUILayout.LabelField(
-            "Revisa las traducciones. Las marcadas [TODO:xx] fallaron y necesitan traduccion manual.",
+            S("at_preview_desc"),
             EditorStyles.miniLabel);
 
         _previewScroll = EditorGUILayout.BeginScrollView(_previewScroll, GUILayout.MaxHeight(250));
@@ -676,7 +676,7 @@ public class AutoTranslateWindow : EditorWindow
             string langName = IdiomasLanguages.GetNativeName(lang);
 
             EditorGUILayout.Space(3);
-            EditorGUILayout.LabelField($"{lang} — {langName} ({entries.Count} traducciones)",
+            EditorGUILayout.LabelField($"{lang} — {langName} ({entries.Count} {S("at_translations")})",
                 EditorStyles.boldLabel);
 
             foreach (var kvp in entries)
@@ -701,17 +701,17 @@ public class AutoTranslateWindow : EditorWindow
         EditorGUILayout.BeginHorizontal();
 
         GUI.backgroundColor = new Color(0.2f, 0.8f, 0.3f);
-        if (GUILayout.Button("Guardar al JSON", GUILayout.Height(30)))
+        if (GUILayout.Button(S("at_save_btn"), GUILayout.Height(30)))
         {
             SaveTranslations();
         }
         GUI.backgroundColor = Color.white;
 
-        if (GUILayout.Button("Descartar", GUILayout.Height(30)))
+        if (GUILayout.Button(S("at_discard_btn"), GUILayout.Height(30)))
         {
             _newTranslations.Clear();
             _hasResults = false;
-            _statusMessage = "Traducciones descartadas.";
+            _statusMessage = S("at_discarded");
         }
 
         EditorGUILayout.EndHorizontal();
@@ -749,18 +749,16 @@ public class AutoTranslateWindow : EditorWindow
         foreach (var lang in _newTranslations.Values)
             totalSaved += lang.Count;
 
-        _statusMessage = $"Guardado: {totalSaved} traducciones en {_newTranslations.Count} idioma(s).";
+        _statusMessage = string.Format(S("at_saved_msg"), totalSaved, _newTranslations.Count);
         _newTranslations.Clear();
         _hasResults = false;
 
         // Recargar para actualizar contadores
         LoadJson();
 
-        EditorUtility.DisplayDialog("Guardado",
-            $"Se guardaron {totalSaved} traducciones.\n" +
-            $"Archivo: {Path.GetFileName(_jsonPath)}\n\n" +
-            "Revisa las marcadas [TODO:xx] y traducelas manualmente.",
-            "OK");
+        EditorUtility.DisplayDialog(S("at_saved_title"),
+            string.Format(S("at_saved_detail"), totalSaved, Path.GetFileName(_jsonPath)),
+            S("ok"));
     }
 
 }

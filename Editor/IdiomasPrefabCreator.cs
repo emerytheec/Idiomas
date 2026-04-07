@@ -13,6 +13,7 @@ using BenderDios.Idiomas;
 /// </summary>
 public static class IdiomasPrefabCreator
 {
+    private static string S(string key) => IdiomasEditorStrings.Get(key);
     // Colores
     private static readonly Color COL_BG      = new Color(0.12f, 0.12f, 0.15f, 0.95f);
     private static readonly Color COL_HEADER   = new Color(0.18f, 0.18f, 0.22f, 1f);
@@ -37,9 +38,8 @@ public static class IdiomasPrefabCreator
         LocalizationManager manager = Object.FindFirstObjectByType<LocalizationManager>();
         if (manager == null)
         {
-            EditorUtility.DisplayDialog("Sin Manager",
-                "No hay LocalizationManager en la escena.\n" +
-                "Arrastra el prefab LocalizationManager a la escena primero.", "OK");
+            EditorUtility.DisplayDialog(S("prefab_no_manager_title"),
+                S("prefab_no_manager_msg"), S("ok"));
             return;
         }
 

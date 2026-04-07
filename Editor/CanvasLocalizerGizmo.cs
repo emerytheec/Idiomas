@@ -9,6 +9,7 @@ using BenderDios.Idiomas;
 /// </summary>
 public static class CanvasLocalizerGizmo
 {
+    private static string S(string key) => IdiomasEditorStrings.Get(key);
     // GUIStyles cacheados para evitar crear nuevos cada frame
     private static GUIStyle _selectedStyle;
     private static GUIStyle _normalStyle;
@@ -24,8 +25,8 @@ public static class CanvasLocalizerGizmo
         if (string.IsNullOrEmpty(canvasId) && textCount == 0) return;
 
         string label = string.IsNullOrEmpty(canvasId)
-            ? $"[Idiomas] {textCount} textos"
-            : $"[Idiomas:{canvasId}] {textCount} textos";
+            ? $"[Idiomas] {textCount} {S("gizmo_texts")}"
+            : $"[Idiomas:{canvasId}] {textCount} {S("gizmo_texts")}";
 
         // Posicion del label: encima del GameObject
         Vector3 pos = localizer.transform.position;
