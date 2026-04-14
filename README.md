@@ -16,9 +16,11 @@ Traduce automaticamente todos los textos de un Canvas a multiples idiomas.
 2. Busca **Idiomas** en la lista de paquetes
 3. Clic en **Add**
 
-### Opcion B: Manual
+### Opcion B: Manual (.unitypackage)
 
-Copia la carpeta `Idiomas/` completa a `Assets/` en tu proyecto de Unity.
+1. Descarga el `.unitypackage` mas reciente desde la pagina de [Releases](https://github.com/emerytheec/Idiomas/releases)
+2. En Unity: `Assets > Import Package > Custom Package`
+3. Selecciona el archivo descargado e importa todo
 
 ### Fuentes CJK (japones, coreano, chino, ruso)
 
@@ -38,7 +40,7 @@ renderizan correctamente.
 
 ### Agregar el prefab a tu escena
 
-1. En el Project, ve a `Assets/Idiomas/Prefabs/`
+1. En el Project, ve a `Packages/com.benderdios.idiomas/Prefabs/` (instalacion VPM) o `Assets/Idiomas/Prefabs/` (instalacion manual)
 2. Arrastra **`LocalizationManager`** a tu escena (Hierarchy)
 3. Esto incluye el LocalizationManager + el selector de idioma (dropdown)
 4. Posiciona el selector de idioma (canvas) donde quieras en tu mundo
@@ -238,6 +240,7 @@ Idiomas/
 │   ├── CsvExportImportWindow.cs     # Exportar/importar CSV
 │   ├── IdiomasLanguages.cs          # Definiciones centralizadas de idiomas
 │   ├── IdiomasEditorUtils.cs        # Utilidades compartidas
+│   ├── IdiomasEditorStrings.cs      # Traducciones del propio inspector (11 idiomas)
 │   ├── IdiomasPrefabCreator.cs      # Creador de demos
 │   └── Idiomas.Editor.asmdef        # Assembly definition
 ├── Prefabs/
@@ -267,17 +270,49 @@ Namespace: `BenderDios.Idiomas`
 | `RegisterListener(UdonSharpBehaviour)` | Registra un listener que recibe `_OnLanguageChanged` al cambiar idioma. |
 | `RegisterLocalizer(TextLocalizer)` | Registra un TextLocalizer en runtime. |
 | `RegisterCanvasLocalizer(CanvasLocalizer)` | Registra un CanvasLocalizer en runtime. |
-| `SetLanguageJapanese()`, `SetLanguageEnglish()`, etc. | Metodos sin parametros para `SendCustomEvent`. |
+| `OnLanguageDropdownChanged()` | Callback que el TMP_Dropdown dispara via `SendCustomEvent` al cambiar la seleccion. |
+
+#### Metodos sin parametros (para `SendCustomEvent`)
+
+Ideales para conectar botones de UI directamente, sin script intermedio.
+
+| Metodo | Idioma |
+|--------|--------|
+| `SetLanguageAuto()` | Deteccion automatica (equivalente a `SetLanguage(null)`) |
+| `SetLanguageEnglish()` | `en` — English |
+| `SetLanguageSpanish()` | `es` — Espanol |
+| `SetLanguageJapanese()` | `ja` — 日本語 |
+| `SetLanguageKorean()` | `ko` — 한국어 |
+| `SetLanguageChineseSimplified()` | `zh-CN` — 中文 (简体) |
+| `SetLanguageChineseTraditional()` | `zh-TW` — 中文 (繁體) |
+| `SetLanguageRussian()` | `ru` — Русский |
+| `SetLanguagePortuguese()` | `pt-BR` — Portugues |
+| `SetLanguageFrench()` | `fr` — Francais |
+| `SetLanguageGerman()` | `de` — Deutsch |
+| `SetLanguageCatalan()` | `ca` — Catala |
 
 ### TextLocalizer
 
-| Metodo | Descripcion |
-|--------|-------------|
-| `UpdateText()` | Actualiza el texto con la traduccion actual. |
-| `SetTranslationKey(string key)` | Cambia la clave en runtime. |
-| `SetParams(string p0)` | Reemplaza `{0}` en la traduccion y actualiza. |
-| `SetParams2(string p0, string p1)` | Reemplaza `{0}` y `{1}`. |
-| `SetParams3(string p0, string p1, string p2)` | Reemplaza `{0}`, `{1}` y `{2}`. |
+| Metodo | Retorno | Descripcion |
+|--------|---------|-------------|
+| `UpdateText()` | `void` | Actualiza el texto con la traduccion actual. Se llama automaticamente. |
+| `SetTranslationKey(string key)` | `void` | Cambia la clave de traduccion y actualiza el texto. |
+| `GetTranslationKey()` | `string` | Devuelve la clave de traduccion actual. |
+| `SetParams(string p0)` | `void` | Reemplaza `{0}` en la traduccion y actualiza. |
+| `SetParams2(string p0, string p1)` | `void` | Reemplaza `{0}` y `{1}`. |
+| `SetParams3(string p0, string p1, string p2)` | `void` | Reemplaza `{0}`, `{1}` y `{2}`. |
+| `GetManager()` | `LocalizationManager` | Devuelve el manager asignado. |
+| `SetManager(LocalizationManager m)` | `void` | Establece el manager manualmente. |
+
+### CanvasLocalizer
+
+| Metodo | Retorno | Descripcion |
+|--------|---------|-------------|
+| `UpdateAllTexts()` | `void` | Actualiza todos los textos del Canvas. Se llama automaticamente al cambiar idioma. |
+| `GetCanvasId()` | `string` | Devuelve el ID del canvas. |
+| `GetBaseLanguage()` | `string` | Devuelve el idioma base configurado. |
+| `GetManager()` | `LocalizationManager` | Devuelve el manager asignado. |
+| `GetTextCount()` | `int` | Numero total de textos gestionados (TMP + Legacy). |
 
 ### Pluralizacion
 
