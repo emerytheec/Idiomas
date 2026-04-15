@@ -4,12 +4,16 @@ Sistema de localizacion standalone para mundos de VRChat usando UdonSharp.
 Traduce automaticamente todos los textos de un Canvas a multiples idiomas.
 
 **100% independiente.** No requiere YamaPlayer ni ningun otro sistema externo.
+**Compatible con PC y Quest.**
+
+📖 **Documentacion completa:** https://emerytheec.github.io/Idiomas-docs/
+📦 **Booth.pm (gratis, .unitypackage):** https://bender-dios.booth.pm/items/8201435
 
 ---
 
 ## Instalacion
 
-### Opcion A: VPM (Creator Companion)
+### Opcion A: VPM (Creator Companion) — recomendado
 
 1. Agrega el repositorio VPM en Creator Companion:
    `https://emerytheec.github.io/vpm-listing/index.json`
@@ -18,9 +22,12 @@ Traduce automaticamente todos los textos de un Canvas a multiples idiomas.
 
 ### Opcion B: Manual (.unitypackage)
 
-1. Descarga el `.unitypackage` mas reciente desde la pagina de [Releases](https://github.com/emerytheec/Idiomas/releases)
-2. En Unity: `Assets > Import Package > Custom Package`
-3. Selecciona el archivo descargado e importa todo
+Descarga el `.unitypackage` desde cualquiera de estas fuentes:
+
+- **Booth.pm** (gratis, 0 JPY): https://bender-dios.booth.pm/items/8201435
+- **GitHub Releases**: https://github.com/emerytheec/Idiomas/releases
+
+Luego en Unity: `Assets > Import Package > Custom Package` y selecciona el archivo.
 
 ### Fuentes CJK (japones, coreano, chino, ruso)
 
