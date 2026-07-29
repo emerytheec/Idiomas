@@ -189,7 +189,7 @@ public class CsvExportImportWindow : EditorWindow
                 {
                     value = vt.String;
                 }
-                sb.Append(CsvEscape(value));
+                sb.Append(CsvEscape(NormalizeCsvExportLineEndings(value)));
             }
             sb.AppendLine();
         }
@@ -271,7 +271,7 @@ public class CsvExportImportWindow : EditorWindow
             for (int c = 0; c < languages.Length && c + 1 < cols.Length; c++)
             {
                 string lang = languages[c];
-                string value = cols[c + 1];
+                string value = NormalizeLineEndings(cols[c + 1]);
 
                 if (string.IsNullOrEmpty(value)) continue;
 
@@ -319,6 +319,29 @@ public class CsvExportImportWindow : EditorWindow
             return "\"" + value.Replace("\"", "\"\"") + "\"";
         }
         return value;
+    }
+
+    /// <summary>
+    /// Normaliza los saltos de linea dentro de una celda CSV.
+    /// En Windows se exportan como CRLF; el JSON y Unity mantienen LF.
+    /// </summary>
+    private static string NormalizeCsvExportLineEndings(string value)
+    {
+        string normalized = NormalizeLineEndings(value);
+        return Application.platform == RuntimePlatform.WindowsEditor
+            ? normalized.Replace("\n", "\r\n")
+            : normalized;
+    }
+
+    /// <summary>
+    /// Normaliza CRLF y CR a LF al importar, independientemente del sistema.
+    /// </summary>
+    private static string NormalizeLineEndings(string value)
+    {
+        if (value == null) return "";
+        return value
+            .Replace("\r\n", "\n")
+            .Replace("\r", "\n");
     }
 
     /// <summary>
